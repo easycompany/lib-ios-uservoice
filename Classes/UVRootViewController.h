@@ -9,14 +9,12 @@
 #import <UIKit/UIKit.h>
 #import "UVBaseViewController.h"
 
+@class UVInitialLoadManager;
 
-// This is an intermediate controller that is responsible for logging in and retrieving
-// the iPhone app config, and then yields control to the actual view controller.
-@interface UVRootViewController : UVBaseViewController {
-    NSString *viewToLoad;
-}
+@interface UVRootViewController : UVBaseViewController
 
 @property (nonatomic, retain) NSString *viewToLoad;
+@property (nonatomic, retain) UVInitialLoadManager *loader;
 
 - (id)initWithViewToLoad:(NSString *)theViewToLoad;
 

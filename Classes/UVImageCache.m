@@ -14,7 +14,7 @@
     static UVImageCache *instance;
     @synchronized(self) {
         if (!instance) {
-            instance = [[UVImageCache alloc] init];
+            instance = [UVImageCache new];
         }
     }
     return instance;
@@ -34,9 +34,7 @@
     if (image) {
         [mostRecentlyUsed removeObject:url];
         [mostRecentlyUsed insertObject:url atIndex:0];
-//        NSLog(@"hit %@", url);
     } else {
-//        NSLog(@"miss %@", url);
     }
     return image;
 }
@@ -46,31 +44,20 @@
         [cache setObject:image forKey:url];
         [mostRecentlyUsed removeObject:url];
         [mostRecentlyUsed insertObject:url atIndex:0];
-//        NSLog(@"overwrite %@", url);
     } else {
         if ([cache count] == maxItems) {
             id lru = [mostRecentlyUsed lastObject];
             [cache removeObjectForKey:lru];
             [mostRecentlyUsed removeObject:lru];
-//            NSLog(@"evict %@", lru);
         }
         [cache setObject:image forKey:url];
         [mostRecentlyUsed insertObject:url atIndex:0];
-//        NSLog(@"add %@", url);
     }
 }
 
 - (void)flush {
     [cache removeAllObjects];
     [mostRecentlyUsed removeAllObjects];
-}
-
-- (void)dealloc {
-    [cache release];
-    cache = nil;
-    [mostRecentlyUsed release];
-    mostRecentlyUsed = nil;
-    [super dealloc];
 }
 
 @end

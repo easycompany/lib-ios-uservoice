@@ -8,10 +8,7 @@
 
 #import "HRRequestOperation.h"
 #import "HRFormatJSON.h"
-#import "NSObject+InvocationUtils.h"
-#import "NSString+EscapingUtils.h"
-#import "NSDictionary+ParamUtils.h"
-#import "HRBase64.h"
+#import "UVUtils.h"
 #import "HROperationQueue.h"
 
 @interface HRRequestOperation (PrivateMethods)
@@ -20,7 +17,6 @@
 - (void)setDefaultHeadersForRequest:(NSMutableURLRequest *)request;
 - (void)setAuthHeadersForRequest:(NSMutableURLRequest *)request;
 - (NSMutableURLRequest *)configuredRequest;
-- (id)formatterFromFormat;
 - (NSURL *)composedURL;
 + (id)handleResponse:(NSHTTPURLResponse *)response error:(NSError **)error;
 + (NSString *)buildQueryStringFromParams:(NSDictionary *)params;
@@ -28,20 +24,6 @@
 @end
 
 @implementation HRRequestOperation
-@synthesize timeout         = _timeout;
-@synthesize requestMethod   = _requestMethod;
-@synthesize path            = _path;
-@synthesize options         = _options;
-@synthesize formatter       = _formatter;
-@synthesize delegate        = _delegate;
-
-- (void)dealloc {
-    [_path release];
-    [_options release];
-    [_formatter release];
-    [_object release];
-    [super dealloc];
-}
 
 - (id)initWithMethod:(HRRequestMethod)method path:(NSString*)urlPath options:(NSDictionary*)opts object:(id)obj {
                  
@@ -51,14 +33,31 @@
         _isCancelled    = NO;
         _requestMethod  = method;
         _path           = [urlPath copy];
-        _options        = [opts retain];
-        _object         = [obj retain];
+        _options        = opts;
+        _object         = obj;
         _timeout        = 120.0;
-        _delegate       = [[opts valueForKey:kHRClassAttributesDelegateKey] nonretainedObjectValue];
-        _formatter      = [[self formatterFromFormat] retain];
+        _delegate       = [opts valueForKey:kHRClassAttributesDelegateKey];
+        _formatter      = [HRFormatJSON class];
     }
 
     return self;
+}
+
+
+- (void)target:(id)target performSelectorOnMainThread:(SEL)selector withObjects:(NSArray *)objects {
+    NSMethodSignature *signature = [target methodSignatureForSelector:selector];
+    if (signature) {
+        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+        [invocation setTarget:target];
+        [invocation setSelector:selector];
+        
+        for (int i = 0; i < objects.count; i++) {
+            id obj = [objects objectAtIndex:i];
+            [invocation setArgument:&obj atIndex:(i + 2)];
+        }
+        
+        [invocation performSelectorOnMainThread:@selector(invoke) withObject:nil waitUntilDone:YES];
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -79,18 +78,14 @@
     _connection = [[NSURLConnection alloc] initWithRequest:request delegate:self startImmediately:YES];
     
     if(_connection) {
-        _responseData = [[NSMutableData alloc] init];        
+        _responseData = [NSMutableData new];        
     } else {
         [self finish];
     }    
 }
 
 - (void)finish {
-    //HRLOG(@"Operation Finished. Releasing...");
-    [_connection release];
     _connection = nil;
-    
-    [_responseData release];
     _responseData = nil;
 
     [self willChangeValueForKey:@"isExecuting"];
@@ -137,7 +132,7 @@
     //HRLOG(@"Server responded with:%i, %@", [response statusCode], [NSHTTPURLResponse localizedStringForStatusCode:[response statusCode]]);
     
     if ([_delegate respondsToSelector:@selector(restConnection:didReceiveResponse:object:)]) {
-        [_delegate performSelectorOnMainThread:@selector(restConnection:didReceiveResponse:object:) withObjects:connection, response, _object, nil];
+        [self target:_delegate performSelectorOnMainThread:@selector(restConnection:didReceiveResponse:object:) withObjects:@[connection, response, _object]];
     }
     
     NSError *error = nil;
@@ -145,7 +140,7 @@
     
     if(error) {
         if([_delegate respondsToSelector:@selector(restConnection:didReceiveError:response:object:)]) {
-            [_delegate performSelectorOnMainThread:@selector(restConnection:didReceiveError:response:object:) withObjects:connection, error, response, _object, nil];
+            [self target:_delegate performSelectorOnMainThread:@selector(restConnection:didReceiveError:response:object:) withObjects:@[connection, error, response, _object]];
             [connection cancel];
             [self finish];
         }
@@ -161,7 +156,7 @@
 - (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error {  
     //HRLOG(@"Connection failed: %@", [error localizedDescription]);
     if([_delegate respondsToSelector:@selector(restConnection:didFailWithError:object:)]) {        
-        [_delegate performSelectorOnMainThread:@selector(restConnection:didFailWithError:object:) withObjects:connection, error, _object, nil];
+        [self target:_delegate performSelectorOnMainThread:@selector(restConnection:didFailWithError:object:) withObjects:@[connection, error, _object]];
     }
     
     [self finish];
@@ -176,18 +171,15 @@
         if(parseError) {
             NSString *rawString = [[NSString alloc] initWithData:_responseData encoding:NSUTF8StringEncoding];
             if([_delegate respondsToSelector:@selector(restConnection:didReceiveParseError:responseBody:object:)]) {
-                [_delegate performSelectorOnMainThread:@selector(restConnection:didReceiveParseError:responseBody:object:) withObjects:connection, parseError, rawString, _object, nil];                
+                [self target:_delegate performSelectorOnMainThread:@selector(restConnection:didReceiveParseError:responseBody:object:) withObjects:@[connection, parseError, rawString, _object]];
             }
-            
-            [rawString release];
             [self finish];
-            
             return;
-        }  
+        }
     }
 
     if([_delegate respondsToSelector:@selector(restConnection:didReturnResource:object:)]) {        
-        [_delegate performSelectorOnMainThread:@selector(restConnection:didReturnResource:object:) withObjects:connection, results, _object, nil];
+        [self target:_delegate performSelectorOnMainThread:@selector(restConnection:didReturnResource:object:) withObjects:@[connection, results, _object]];
     }
         
     [self finish];
@@ -220,14 +212,14 @@
     if(username || password) {
         NSString *userPass = [NSString stringWithFormat:@"%@:%@", username, password];
         NSData   *upData = [userPass dataUsingEncoding:NSUTF8StringEncoding];
-        NSString *encodedUserPass = [HRBase64 encode:upData];
+        NSString *encodedUserPass = [UVUtils encodeData64:upData];
         NSString *basicHeader = [NSString stringWithFormat:@"Basic %@", encodedUserPass];
         [request setValue:basicHeader forHTTPHeaderField:@"Authorization"];
     }
 }
 
 - (NSMutableURLRequest *)configuredRequest {
-    NSMutableURLRequest *request = [[[NSMutableURLRequest alloc] init] autorelease];
+    NSMutableURLRequest *request = [NSMutableURLRequest new];
     [request setCachePolicy:NSURLRequestReloadIgnoringLocalCacheData];
     [request setTimeoutInterval:_timeout];
     [request setHTTPShouldHandleCookies:YES];
@@ -254,7 +246,7 @@
         
         NSData *bodyData = nil;   
         if([body isKindOfClass:[NSDictionary class]]) {
-            bodyData = [[body toQueryString] dataUsingEncoding:NSUTF8StringEncoding];
+            bodyData = [[UVUtils toQueryString:body] dataUsingEncoding:NSUTF8StringEncoding];
         } else if([body isKindOfClass:[NSString class]]) {
             bodyData = [body dataUsingEncoding:NSUTF8StringEncoding];
         } else if([body isKindOfClass:[NSData class]]) {
@@ -288,28 +280,7 @@
     if([tmpURI host])
         return tmpURI;
         
-    return [NSURL URLWithString:[[baseURL absoluteString] stringByAppendingPathComponent:_path]];
-}
-
-- (id)formatterFromFormat {
-    NSNumber *format = [[self options] objectForKey:kHRClassAttributesFormatKey];
-    id theFormatter = nil;
-    switch([format intValue]) {
-        case HRDataFormatJSON:
-            theFormatter = [HRFormatJSON class];
-        break;
-//        case HRDataFormatXML:
-//            theFormatter = [HRFormatXML class];
-//        break;
-        default:
-            theFormatter = [HRFormatJSON class];
-        break;   
-    }
-    
-    NSString *errorMessage = [NSString stringWithFormat:@"Invalid Formatter %@", NSStringFromClass(theFormatter)];
-    NSAssert([theFormatter conformsToProtocol:@protocol(HRFormatterProtocol)], errorMessage); 
-    
-    return theFormatter;
+    return [NSURL URLWithString:[[baseURL absoluteString] stringByAppendingString:_path]];
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -317,7 +288,7 @@
 + (HRRequestOperation *)requestWithMethod:(HRRequestMethod)method path:(NSString*)urlPath options:(NSDictionary*)requestOptions object:(id)obj {
     id operation = [[self alloc] initWithMethod:method path:urlPath options:requestOptions object:obj];
     [[HROperationQueue sharedOperationQueue] addOperation:operation];
-    return [operation autorelease];
+    return operation;
 }
 
 + (id)handleResponse:(NSHTTPURLResponse *)response error:(NSError **)error {
@@ -331,13 +302,13 @@
 
     if(error != nil) {
         NSDictionary *headers = [response allHeaderFields];
-        NSString *errorReason = [NSString stringWithFormat:@"%d Error: ", code];
+        NSString *errorReason = [NSString stringWithFormat:@"%d Error: ", (int)code];
         NSString *errorDescription = [NSHTTPURLResponse localizedStringForStatusCode:code];
-        NSDictionary *userInfo = [[[NSDictionary dictionaryWithObjectsAndKeys:
-                                   errorReason, NSLocalizedFailureReasonErrorKey,
-                                   errorDescription, NSLocalizedDescriptionKey, 
-                                   headers, kHRClassAttributesHeadersKey, 
-                                   [[response URL] absoluteString], @"url", nil] retain] autorelease];
+        NSDictionary *userInfo = [NSDictionary dictionaryWithObjectsAndKeys:
+            errorReason, NSLocalizedFailureReasonErrorKey,
+            errorDescription, NSLocalizedDescriptionKey, 
+            headers, kHRClassAttributesHeadersKey, 
+            [[response URL] absoluteString], @"url", nil];
         *error = [NSError errorWithDomain:HTTPRiotErrorDomain code:code userInfo:userInfo];
     }
 
@@ -347,7 +318,7 @@
 + (NSString *)buildQueryStringFromParams:(NSDictionary *)theParams {
     if(theParams) {
         if([theParams count] > 0)
-            return [NSString stringWithFormat:@"?%@", [theParams toQueryString]];
+            return [NSString stringWithFormat:@"?%@", [UVUtils toQueryString:theParams]];
     }
     
     return @"";

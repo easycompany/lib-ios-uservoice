@@ -7,64 +7,64 @@
 //
 
 #import <UIKit/UIKit.h>
+#import "UVCallback.h"
+#import "UVSigninManager.h"
+#import "UVDefines.h"
 
 @class UVActivityIndicator;
 
 // Base class for UserVoice content view controllers. Will handle things like
 // the search box, help bar, etc.
-@interface UVBaseViewController : UIViewController {
-    UVActivityIndicator *activityIndicator;
-    BOOL needsReload;
-    UITableView *tableView;
-    NSInteger kbHeight;
-    UIBarButtonItem *exitButton;
+@interface UVBaseViewController : UIViewController<UIAlertViewDelegate, UITextFieldDelegate, UVSigninManagerDelegate> {
+    BOOL _firstController;
+    UITableView *_tableView;
+    NSInteger _kbHeight;
+    UIBarButtonItem *_exitButton;
+    UVSigninManager *_signinManager;
+    NSString *_userName;
+    NSString *_userEmail;
 }
 
-@property (nonatomic, retain) UVActivityIndicator *activityIndicator;
-@property (assign) BOOL needsReload;
+@property (nonatomic, assign) BOOL firstController;
 @property (nonatomic, retain) UITableView *tableView;
 @property (nonatomic, retain) UIBarButtonItem *exitButton;
+@property (nonatomic, retain) UVSigninManager *signinManager;
+@property (nonatomic, retain) NSString *userEmail;
+@property (nonatomic, retain) NSString *userName;
+@property (nonatomic, retain) UIView *shade;
+@property (nonatomic, retain) UIActivityIndicatorView *activityIndicatorView;
+@property (nonatomic, retain) NSMutableDictionary *templateCells;
 
-- (void)dismissUserVoice;
+- (void)dismiss;
 
 // Calculates the content view frame, based on the size and position of the
 // navigation bar.
-- (CGRect)contentFrameWithNavBar:(BOOL)navBarEnabled;
 - (CGRect)contentFrame;
 
-// Shows the activity indicator.
+// activity indicator
 - (void)showActivityIndicator;
-- (void)showActivityIndicatorWithText:(NSString *)text;
-
-// Hides the activity indivator.
 - (void)hideActivityIndicator;
 
-- (void)setVoteLabelTextAndColorForVotesRemaining:(NSInteger)votesRemaining label:(UILabel *)label;
+// navigation buttons
+- (void)disableSubmitButton;
+- (void)enableSubmitButton;
+- (void)enableSubmitButtonForce:(BOOL)force;
+- (BOOL)shouldEnableSubmitButton;
 
 - (void)initNavigationItem;
+- (void)presentModalViewController:(UIViewController *)viewController;
 
 // Callback for HTTP errors. The default implementation hides the activity indicator
 // and displays an error alert. Can be overridden in subclasses that require
 // specialized behavior.
 - (void)didReceiveError:(NSError *)error;
 
-// Override this to use a title other than "Back".
-- (NSString *)backButtonTitle;
-
-// Adds a background gradient from dark to light gray
-//- (void)addGradientBackground;
-
-// Magic incantation to remove the white cell background, border, and rounded corners.
-- (void)removeBackgroundFromCell:(UITableViewCell *)cell;
-
-// Adds a highlight row at the top. You need to separately add a dark shadow via
-// the table separator.
-- (void)addHighlightToCell:(UITableViewCell *)cell;
-
-- (void)addShadowSeparatorToTableView:(UITableView *)tableView;
+- (void)requireUserSignedIn:(UVCallback *)callback;
+- (void)requireUserAuthenticated:(NSString *)email name:(NSString *)name callback:(UVCallback *)callback;
 
 // Keyboard handling
 - (void)registerForKeyboardNotifications;
+- (void)keyboardWillShow:(NSNotification*)notification;
 - (void)keyboardDidShow:(NSNotification*)notification;
 - (void)keyboardDidHide:(NSNotification*)notification;
 
@@ -79,10 +79,13 @@
                                   selectable:(BOOL)selectable;
 
 - (void)alertError:(NSString *)message;
-- (void)alertSuccess:(NSString *)message;
-- (void)hideExitButton;
-- (void)showExitButton;
-- (void)promptUserToSignIn;
 - (void)setupGroupedTableView;
+- (UIScrollView *)scrollView;
+
+- (CGFloat)heightForDynamicRowWithReuseIdentifier:(NSString *)reuseIdentifier indexPath:(NSIndexPath *)indexPath;
+- (void)configureView:(UIView *)superview subviews:(NSDictionary *)viewsDict constraints:(NSArray *)constraintStrings;
+- (void)configureView:(UIView *)superview subviews:(NSDictionary *)viewsDict constraints:(NSArray *)constraintStrings finalCondition:(BOOL)includeFinalConstraint finalConstraint:(NSString *)finalConstraint;
+- (UITextField *)configureView:(UIView *)view label:(NSString *)labelText placeholder:(NSString *)placeholderText;
+- (UIView *)poweredByView;
 
 @end

@@ -9,14 +9,12 @@
 #import "UVBaseViewController.h"
 #import "UVArticle.h"
 
-@interface UVArticleViewController : UVBaseViewController {
-    UVArticle *article;
-    UIWebView *webView;
-}
+@interface UVArticleViewController : UVBaseViewController<UIActionSheetDelegate>
 
 @property (nonatomic, retain) UVArticle *article;
 @property (nonatomic, retain) UIWebView *webView;
-
-- (id)initWithArticle:(UVArticle *)article;
+@property (nonatomic, retain) NSString *helpfulPrompt;
+@property (nonatomic, retain) NSString *returnMessage;
+@property (nonatomic, retain) NSString *deflectingType;
 
 @end

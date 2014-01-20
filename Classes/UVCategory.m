@@ -7,29 +7,17 @@
 //
 
 #import "UVCategory.h"
-#import "NSString+HTMLEntities.h"
+#import "UVUtils.h"
 
 
 @implementation UVCategory
 
-@synthesize categoryId;
-@synthesize name;
-
 - (id)initWithDictionary:(NSDictionary *)dict {
     if (self = [super init]) {
-        self.categoryId = [(NSNumber *)[dict objectForKey:@"id"] integerValue];
-        self.name = [[self objectOrNilForDict:dict key:@"name"] stringByDecodingHTMLEntities];
+        _categoryId = [(NSNumber *)[dict objectForKey:@"id"] integerValue];
+        _name = [UVUtils decodeHTMLEntities:[self objectOrNilForDict:dict key:@"name"]];
     }
     return self;
-}
-
-- (NSString *)description {
-    return [NSString stringWithFormat:@"categoryId: %d\nname: %@", self.categoryId, self.name];
-}
-
-- (void)dealloc {
-    self.name = nil;
-    [super dealloc];
 }
 
 @end

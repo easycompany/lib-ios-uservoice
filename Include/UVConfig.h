@@ -8,16 +8,11 @@
 
 #import <Foundation/Foundation.h>
 
-@interface UVConfig : NSObject {
-    NSString *site;
-    NSString *key;
-    NSString *secret;
-    NSString *ssoToken;
-    NSString *displayName;
-    NSString *email;
-    NSString *guid;
-}
+@interface UVConfig : NSObject
 
++ (UVConfig *)configWithSite:(NSString *)site;
+
+// deprecated
 + (UVConfig *)configWithSite:(NSString *)site andKey:(NSString *)key andSecret:(NSString *)secret;
 + (UVConfig *)configWithSite:(NSString *)site andKey:(NSString *)key andSecret:(NSString *)secret andSSOToken:(NSString *)token;
 + (UVConfig *)configWithSite:(NSString *)site andKey:(NSString *)key andSecret:(NSString *)secret andEmail:(NSString *)email andDisplayName:(NSString *)displayName andGUID:(NSString *)guid;
@@ -29,10 +24,19 @@
 @property (nonatomic, retain) NSString *displayName;
 @property (nonatomic, retain) NSString *email;
 @property (nonatomic, retain) NSString *guid;
+@property (nonatomic, retain) NSDictionary *customFields;
+@property (nonatomic, assign) NSInteger topicId;
+@property (nonatomic, assign) NSInteger forumId;
+@property (nonatomic, assign) BOOL showForum;
+@property (nonatomic, assign) BOOL showPostIdea;
+@property (nonatomic, assign) BOOL showContactUs;
+@property (nonatomic, assign) BOOL showKnowledgeBase;
+@property (nonatomic, retain) NSString* extraTicketInfo;
+@property (nonatomic, retain) NSDictionary *userTraits;
 
-- (id)initWithSite:(NSString *)theSite andKey:(NSString *)theKey andSecret:(NSString *)theSecret;
-- (id)initWithSite:(NSString *)theSite andKey:(NSString *)theKey andSecret:(NSString *)theSecret andSSOToken:(NSString *)theToken;
-- (id)initWithSite:(NSString *)theSite andKey:(NSString *)theKey andSecret:(NSString *)theSecret andEmail:(NSString *)theEmail andDisplayName:(NSString *)theDisplayName andGUID:(NSString *)theGuid;
-- (BOOL)wasSignedInBySDK;
+- (void)identifyUserWithEmail:(NSString *)email name:(NSString *)name guid:(NSString *)guid;
+
+// merged user and account traits
+- (NSDictionary *)traits;
 
 @end

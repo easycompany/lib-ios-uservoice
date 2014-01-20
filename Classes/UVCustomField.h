@@ -9,17 +9,15 @@
 #import <Foundation/Foundation.h>
 #import "UVBaseModel.h"
 
-@interface UVCustomField : UVBaseModel {
-    NSString *name;
-    NSArray *values;
-    NSInteger fieldId;
-}
+@interface UVCustomField : UVBaseModel
 
-@property (assign) NSInteger fieldId;
+@property (nonatomic, assign) NSInteger fieldId;
+@property (nonatomic, assign) BOOL required;
 @property (nonatomic, retain) NSString *name;
 @property (nonatomic, retain) NSArray *values;
 
 - (id)initWithDictionary:(NSDictionary *)dict;
 - (BOOL)isPredefined;
+- (BOOL)isRequired;
 
 @end

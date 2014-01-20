@@ -11,75 +11,39 @@
 
 @class UVSuggestion;
 
-@interface UVUser : UVBaseModel {
-    NSInteger userId;
-    NSString *name;
-    NSString *displayName;
-    NSString *email;
-    BOOL emailConfirmed;
-    BOOL suggestionsNeedReload;
-    NSInteger ideaScore;
-    NSInteger activityScore;
-    NSInteger karmaScore;
-    NSInteger supportedSuggestionsCount;
-    NSInteger createdSuggestionsCount;
-    NSString *url;
-    NSString *avatarUrl;
-    NSMutableArray *supportedSuggestions;
-    NSMutableArray *createdSuggestions;
-    NSDate *createdAt;
-}
+@protocol UVUserDelegate;
 
-@property (assign) NSInteger userId;
+@interface UVUser : UVBaseModel
+
+@property (nonatomic, assign) NSInteger userId;
 @property (nonatomic, retain) NSString *name;
-@property (nonatomic, retain) NSString *displayName;
 @property (nonatomic, retain) NSString *email;
-@property (assign) BOOL emailConfirmed;
-@property (assign) BOOL suggestionsNeedReload;
-@property (assign) NSInteger ideaScore;
-@property (assign) NSInteger activityScore;
-@property (assign) NSInteger karmaScore;
-@property (nonatomic, retain) NSString *url;
-@property (nonatomic, retain) NSString *avatarUrl;
-@property (nonatomic, retain) NSMutableArray *supportedSuggestions;
-@property (nonatomic, retain) NSMutableArray *createdSuggestions;
-@property (nonatomic, retain) NSDate *createdAt;
 
-- (NSInteger)createdSuggestionsCount;
-- (NSInteger)supportedSuggestionsCount;
-
-
-// fetch
-+ (id)getWithUserId:(NSInteger)userId delegate:(id)delegate;
++ (id)forgotPassword:(NSString *)email delegate:(id<UVUserDelegate>)delegate;
 
 // discover
-+ (id)discoverWithEmail:(NSString *)email delegate:(id)delegate;
-+ (id)discoverWithGUID:(NSString *)guid delegate:(id)delegate;
++ (id)discoverWithEmail:(NSString *)email delegate:(id<UVUserDelegate>)delegate;
 
 // create
-+ (id)findOrCreateWithEmail:(NSString *)anEmail andName:(NSString *)aName andDelegate:(id)delegate;
-+ (id)findOrCreateWithGUID:(NSString *)aGUID andEmail:(NSString *)anEmail andName:(NSString *)aName andDelegate:(id)delegate;
-+ (id)findOrCreateWithSsoToken:(NSString *)aToken delegate:(id)delegate;
-+ (id)retrieveCurrentUser:(id)delegate;
-
-// use https (updates and creations only)
-+ (void)useHTTPS:(BOOL)secure;
++ (id)findOrCreateWithEmail:(NSString *)anEmail andName:(NSString *)aName andDelegate:(id<UVUserDelegate>)delegate;
++ (id)findOrCreateWithGUID:(NSString *)aGUID andEmail:(NSString *)anEmail andName:(NSString *)aName andDelegate:(id<UVUserDelegate>)delegate;
++ (id)findOrCreateWithSsoToken:(NSString *)aToken delegate:(id<UVUserDelegate>)delegate;
++ (id)retrieveCurrentUser:(id<UVUserDelegate>)delegate;
 
 // update
-- (id)updateName:(NSString *)newName email:(NSString *)newEmail delegate:(id)delegate;
-- (void)didSupportSuggestion:(UVSuggestion *)suggestion;
-- (void)didWithdrawSupportForSuggestion:(UVSuggestion *)suggestion;
-- (void)didCreateSuggestion:(UVSuggestion *)suggestion;
-- (void)didLoadSuggestions:(NSArray *)suggestions;
+- (id)identify:(NSString *)externalId withScope:(NSString *)externalScope delegate:(id<UVUserDelegate>)delegate;
 
-// others
-- (id)forgotPasswordForEmail:(NSString *)anEmail andDelegate:(id)delegate;
+@end
 
-- (BOOL)hasEmail;
-- (BOOL)hasConfirmedEmail;
-- (BOOL)hasUnconfirmedEmail;
 
-// Returns the user's name, or "Anonymous" if they don't have one.
-- (NSString *)nameOrAnonymous;
+@protocol UVUserDelegate <NSObject>
+
+@optional
+
+- (void)didCreateUser:(UVUser *)user;
+- (void)didDiscoverUser:(UVUser *)user;
+- (void)didIdentifyUser:(UVUser *)user;
+- (void)didRetrieveCurrentUser:(UVUser *)user;
+- (void)didSendForgotPassword:(id)obj;
 
 @end

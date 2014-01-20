@@ -7,4 +7,6 @@ xcuserdata
 *.perspectivev3
 xcuserdata
 profile
+.idea
+*.swp
 dist

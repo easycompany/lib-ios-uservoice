@@ -10,7 +10,7 @@
 
 #import "YOAuthRequest.h"
 
-#import "NSString+URLEncoding.h"
+#import "UVUtils.h"
 #import "YOAuthUtil.h"
 #import "YOAuthSignatureMethod_HMAC-SHA1.h"
 #import "YOAuthSignatureMethod_PLAINTEXT.h"
@@ -58,29 +58,24 @@
 
 - (NSString *)signableString
 {
-	NSMutableArray *signableObjects = [[NSMutableArray alloc] init];	
-	//NSLog(@"signableString: %@, %@, %@", HTTPMethod, url, [self signableParameters]);
+	NSMutableArray *signableObjects = [NSMutableArray new];	
+
+	[signableObjects addObject:[UVUtils URLEncode:HTTPMethod]];
+	[signableObjects addObject:[UVUtils URLEncode:[url absoluteString]]];
+	[signableObjects addObject:[UVUtils URLEncode:[self signableParameters]]];
 	
-	[signableObjects addObject:[HTTPMethod URLEncodedString]];
-	[signableObjects addObject:[[url absoluteString] URLEncodedString]];
-	[signableObjects addObject:[[self signableParameters] URLEncodedString]];
-	
-	NSString *theSignableString = [signableObjects componentsJoinedByString:@"&"];
-	[signableObjects autorelease];
-	
-	return theSignableString;
+	return [signableObjects componentsJoinedByString:@"&"];
 }
 
 - (NSString *)signableSecrets
 {
 	NSString *theTokenSecret = (token != nil) ? token.secret : @"";
 	
-	NSMutableArray *secrets = [[NSMutableArray alloc] init];
+	NSMutableArray *secrets = [NSMutableArray new];
 	[secrets addObject:consumer.secret];
 	[secrets addObject:theTokenSecret];
 	
 	NSString *theSignableSecrets = [secrets componentsJoinedByString:@"&"];
-	[secrets release];
 	
 	return theSignableSecrets;
 }
@@ -88,7 +83,7 @@
 - (NSString *)signableParameters
 {
 	NSMutableDictionary *requestDictionary = [self allRequestParametersAsDictionary];
-	NSMutableArray *queryParameters = [[NSMutableArray alloc] init];
+	NSMutableArray *queryParameters = [NSMutableArray new];
 	
 	if([requestDictionary valueForKey:@"oauth_signature"]) {
 		[requestDictionary removeObjectForKey:@"oauth_signature"];
@@ -96,14 +91,11 @@
 	
 	for (NSString *key in [requestDictionary allKeys]) {
 		NSString *value = [requestDictionary objectForKey:key];
-		NSString *keyValuePair = [NSString stringWithFormat:@"%@=\%@", [key URLEncodedString], [value URLEncodedString]];
+		NSString *keyValuePair = [NSString stringWithFormat:@"%@=\%@", [UVUtils URLEncode:key], [UVUtils URLEncode:value]];
 		[queryParameters addObject:keyValuePair];
 	}
 	
 	NSMutableArray *sortedQueryParams = (NSMutableArray*)[queryParameters sortedArrayUsingSelector:@selector(compare:)];
-	
-	[queryParameters release];
-	
 	NSString *keyValuePairs = [sortedQueryParams componentsJoinedByString:@"&"];
 	return keyValuePairs;
 }
@@ -148,9 +140,9 @@
 		[self setHTTPMethod:aHTTPMethod];
 		
 		if(aMethod == nil || [aMethod isEqualToString:@"HMAC-SHA1"]) {
-			signatureMethod = [[YOAuthSignatureMethod_HMAC_SHA1 alloc] init];
+			signatureMethod = [YOAuthSignatureMethod_HMAC_SHA1 new];
 		}else if([aMethod isEqualToString:@"PLAINTEXT"]){
-			signatureMethod = [[YOAuthSignatureMethod_PLAINTEXT alloc] init];
+			signatureMethod = [YOAuthSignatureMethod_PLAINTEXT new];
 		}else{
 			NSLog(@"Signature Method: \"%@\" not supported.", aMethod);
 		}
@@ -178,7 +170,7 @@
 	[self setOauthNonce:[YOAuthUtil oauth_nonce]];
 	[self setOauthVersion:[YOAuthUtil oauth_version]];
 	
-	oauthParams = [[NSMutableDictionary alloc] init];
+	oauthParams = [NSMutableDictionary new];
 	[oauthParams setObject:self.oauthNonce forKey:@"oauth_nonce"];
 	[oauthParams setObject:self.oauthTimestamp forKey:@"oauth_timestamp"];
 	[oauthParams setObject:self.oauthVersion forKey:@"oauth_version"];
@@ -195,70 +187,51 @@
 
 - (NSMutableDictionary *)allRequestParametersAsDictionary
 {
-	NSMutableDictionary *parameterDictionary = [[NSMutableDictionary alloc] init];
+	NSMutableDictionary *parameterDictionary = [NSMutableDictionary new];
 	[parameterDictionary addEntriesFromDictionary:oauthParams];
 	if(requestParams && [requestParams count]) [parameterDictionary addEntriesFromDictionary:requestParams];
 	
-	return [parameterDictionary autorelease];
+	return parameterDictionary;
 }
 
 - (NSMutableDictionary *)allNonOAuthRequestParametersAsDictionary
 {
-	NSMutableDictionary *parameterDictionary = [[NSMutableDictionary alloc] init];
+	NSMutableDictionary *parameterDictionary = [NSMutableDictionary new];
 	if(requestParams && [requestParams count]) [parameterDictionary addEntriesFromDictionary:requestParams];
 	
-	return [parameterDictionary autorelease];
+	return parameterDictionary;
 }
 
 - (NSMutableDictionary *)allOAuthRequestParametersAsDictionary
 {
-	NSMutableDictionary *parameterDictionary = [[NSMutableDictionary alloc] init];
+	NSMutableDictionary *parameterDictionary = [NSMutableDictionary new];
 	[parameterDictionary addEntriesFromDictionary:self.oauthParams];
 	
-	return [parameterDictionary autorelease];
+	return parameterDictionary;
 }
 
 - (NSString *)buildAuthorizationHeaderValue
 {
-	NSMutableArray *authorizationHeaderParts = [[NSMutableArray alloc] init];
+	NSMutableArray *authorizationHeaderParts = [NSMutableArray new];
 	
 	if(realm && ![realm isEqualToString:@""]) {
-		[authorizationHeaderParts addObject:[NSString stringWithFormat:@"realm=\"%@\"", [realm URLEncodedString]]];
+		[authorizationHeaderParts addObject:[NSString stringWithFormat:@"realm=\"%@\"", [UVUtils URLEncode:realm]]];
 	}
 	
-	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_consumer_key=\"%@\"", [self.consumer.key URLEncodedString]]];
-	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_signature_method=\"%@\"", [[signatureMethod name] URLEncodedString]]];
-	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_signature=\"%@\"", [self.oauthSignature URLEncodedString]]];
-	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_timestamp=\"%@\"", [self.oauthTimestamp URLEncodedString]]];
-	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_nonce=\"%@\"", [self.oauthNonce URLEncodedString]]];
-	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_version=\"%@\"", [self.oauthVersion URLEncodedString]]];
+	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_consumer_key=\"%@\"", [UVUtils URLEncode:self.consumer.key]]];
+	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_signature_method=\"%@\"", [UVUtils URLEncode:[signatureMethod name]]]];
+	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_signature=\"%@\"", [UVUtils URLEncode:self.oauthSignature]]];
+	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_timestamp=\"%@\"", [UVUtils URLEncode:self.oauthTimestamp]]];
+	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_nonce=\"%@\"", [UVUtils URLEncode:self.oauthNonce]]];
+	[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_version=\"%@\"", [UVUtils URLEncode:self.oauthVersion]]];
 	
 	if(token && ![token.key isEqualToString:@""]){
-		[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_token=\"%@\"", [self.token.key URLEncodedString]]];
+		[authorizationHeaderParts addObject:[NSString stringWithFormat:@"oauth_token=\"%@\"", [UVUtils URLEncode:self.token.key]]];
 	}
 	
 	NSString *authorizationHeaderValue = [NSString stringWithFormat:@"OAuth %@", [authorizationHeaderParts componentsJoinedByString:@","]];
 	
-	[authorizationHeaderParts release];
-	
 	return authorizationHeaderValue;
-}
-
-- (void)dealloc {
-    self.consumer = nil;
-    self.token = nil;
-    self.realm = nil;
-    self.HTTPMethod = nil;
-    self.url = nil;
-    self.requestParams = nil;
-    self.oauthParams = nil;
-    self.oauthSignature = nil;
-    self.oauthNonce = nil;
-    self.oauthVersion = nil;
-    self.oauthTimestamp = nil;
-    [signatureMethod release];
-    signatureMethod = nil;
-    [super dealloc];
 }
 
 @end

@@ -12,15 +12,12 @@
 #import "UVSession.h"
 #import "UVSuggestion.h"
 #import "UVSuggestionDetailsViewController.h"
-#import "UVNewSuggestionViewController.h"
-#import "UVProfileViewController.h"
-#import "UVInfoViewController.h"
 #import "UVStyleSheet.h"
 #import "UVUser.h"
-#import "UVTextEditor.h"
-#import "UVCellViewWithIndex.h"
-#import "UVStreamPoller.h"
-#import "UVSuggestionButton.h"
+#import "UVConfig.h"
+#import "UVUtils.h"
+#import "UVBabayaga.h"
+#import "UVPostIdeaViewController.h"
 
 #define SUGGESTIONS_PAGE_SIZE 10
 #define UV_SEARCH_TEXTBAR 1
@@ -29,509 +26,310 @@
 #define UV_SEARCH_RESULTS_TAG_CELL_ADD_SUFFIX 102
 #define UV_BASE_GROUPED_CELL_BG 103
 #define UV_BASE_SUGGESTION_LIST_TAG_CELL_BACKGROUND 104
+#define UV_SEARCH_TOOLBAR 1000
+#define UV_SEARCH_TOOLBAR_LABEL 1001
 
-@implementation UVSuggestionListViewController
+#define TITLE 20
+#define SUBSCRIBER_COUNT 21
+#define STATUS 22
+#define STATUS_COLOR 23
+#define LOADING 30
 
-@synthesize forum = _forum;
-@synthesize textEditor = _textEditor;
-@synthesize suggestions;
-
-- (id)initWithForum:(UVForum *)theForum {
-    if ((self = [super init])) {
-        if (theForum.currentTopic.suggestions) {
-            self = [self initWithForum:theForum andSuggestions:theForum.currentTopic.suggestions];
-        } else {
-            self.forum = theForum;
-        }
-        _searching = NO;
-    }
-    return self;
+@implementation UVSuggestionListViewController {
+    UITableViewCell *_templateCell;
+    UILabel *_loadingLabel;
+    BOOL _loading;
 }
 
-- (id)initWithForum:(UVForum *)theForum andSuggestions:(NSArray *)theSuggestions {
+- (id)init {
     if ((self = [super init])) {
-        self.suggestions = [NSMutableArray arrayWithArray:theSuggestions];
-        self.forum = theForum;
-        _searching = NO;
+        _forum = [UVSession currentSession].forum;
     }
     return self;
-}
-
-- (NSString *)backButtonTitle {
-    return NSLocalizedStringFromTable(@"Ideas", @"UserVoice", nil);
 }
 
 - (void)retrieveMoreSuggestions {
-    NSInteger page = ([self.suggestions count] / SUGGESTIONS_PAGE_SIZE) + 1;
+    NSInteger page = (_suggestions.count / SUGGESTIONS_PAGE_SIZE) + 1;
     [self showActivityIndicator];
-    //NSLog(@"retrieveMoreSuggestions: %@", self.forum);
-    [UVSuggestion getWithForum:self.forum page:page delegate:self];
+    [UVSuggestion getWithForum:_forum page:page delegate:self];
 }
 
-// Populates the suggestions. The default implementation retrieves the 10 most recent
-// suggestions, but this can be overridden in subclasses (e.g. for profile idea view).
 - (void)populateSuggestions {
-    self.suggestions = [NSMutableArray arrayWithCapacity:10];
-    [UVSession currentSession].clientConfig.forum.currentTopic.suggestions = [NSMutableArray arrayWithCapacity:10];
-    [UVSession currentSession].clientConfig.forum.currentTopic.suggestionsNeedReload = NO;
+    _suggestions = [NSMutableArray arrayWithCapacity:10];
+    _forum.suggestions = [NSMutableArray arrayWithCapacity:10];
     [self retrieveMoreSuggestions];
 }
 
 - (void)didRetrieveSuggestions:(NSArray *)theSuggestions {
-    [self hideActivityIndicator];
-    if ([theSuggestions count] > 0) {
-        //NSLog(@"Retrieved Suggestions: %@", theSuggetions);
-        [self.suggestions addObjectsFromArray:theSuggestions];
-        //NSLog(@"Stored Suggestions: %@", self.suggestions);
+    if (theSuggestions.count > 0) {
+        [_suggestions addObjectsFromArray:theSuggestions];
     }
 
-    [[UVSession currentSession].clientConfig.forum.currentTopic.suggestions addObjectsFromArray:theSuggestions];
-    [self.tableView reloadData];
+    [_forum.suggestions addObjectsFromArray:theSuggestions];
+    [self hideActivityIndicator];
+    [_tableView reloadData];
 }
 
 - (void)didSearchSuggestions:(NSArray *)theSuggestions {
-    [self.suggestions removeAllObjects];
-    [self hideActivityIndicator];
-    if ([theSuggestions count] > 0) {
-        [self.suggestions addObjectsFromArray:theSuggestions];
-    }
+    _searchResults = theSuggestions;
     NSMutableArray *ids = [NSMutableArray arrayWithCapacity:[theSuggestions count]];
     for (UVSuggestion *suggestion in theSuggestions) {
         [ids addObject:[NSNumber numberWithInt:suggestion.suggestionId]];
     }
-    [[UVSession currentSession] trackInteraction:[theSuggestions count] > 0 ? @"rip" : @"riz" details:[NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithInt:[theSuggestions count]], @"count", ids, @"ids", nil]];
-
-    [self.tableView reloadData];
-}
-
-- (BOOL)supportsSearch {
-    return YES;
-}
-
-- (void)addSuggestion:(UVCellViewWithIndex *)cellView {
-    UVNewSuggestionViewController *next = [[UVNewSuggestionViewController alloc] initWithForum:self.forum
-                                                                                         title:_textEditor.text];
-    [self.navigationController pushViewController:next animated:YES];
-    [next release];
-    [self dismissTextEditor];
+    [UVBabayaga track:SEARCH_IDEAS searchText:_searchController.searchBar.text ids:ids];
+    [_searchController.searchResultsTableView reloadData];
 }
 
 #pragma mark ===== UITableViewDataSource Methods =====
 
-// Overridden from superclass. In this case the Extra cell is responsible for
-// creating a new suggestion.
 - (void)initCellForAdd:(UITableViewCell *)cell indexPath:(NSIndexPath *)indexPath {
-    // getting the cell size
-    CGRect contentRect = cell.contentView.bounds;
-    UVCellViewWithIndex *cellView = [[UVCellViewWithIndex alloc] initWithIndex:indexPath.row andFrame:contentRect];
-
-    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-
-    UIFont *font = [UIFont boldSystemFontOfSize:18];
-    UILabel *label = [[UILabel alloc] init];
-    label.tag = UV_SEARCH_RESULTS_TAG_CELL_ADD_PREFIX;
-  label.text = [NSString stringWithFormat:@"%@ \"", NSLocalizedStringFromTable(@"Add", @"UserVoice", nil)];
-    label.font = font;
-    label.textAlignment = UITextAlignmentLeft;
-    label.textColor = [UVStyleSheet primaryTextColor];
-    label.backgroundColor = [UIColor clearColor];
-    [cellView addSubview:label];
-    [label release];
-
-    label = [[UILabel alloc] init];
-    label.tag = UV_SEARCH_RESULTS_TAG_CELL_ADD_QUERY;
-    label.text = _textEditor.text;
-    label.font = font;
-    label.textAlignment = UITextAlignmentLeft;
-    label.textColor = [UVStyleSheet linkTextColor];
-    label.backgroundColor = [UIColor clearColor];
-    [cellView addSubview:label];
-    [label release];
-
-    label = [[UILabel alloc] init];
-    label.tag = UV_SEARCH_RESULTS_TAG_CELL_ADD_SUFFIX;
-    label.text = @"\"";
-    label.font = font;
-    label.textAlignment = UITextAlignmentLeft;
-    label.textColor = [UVStyleSheet primaryTextColor];
-    label.backgroundColor = [UIColor clearColor];
-    [cellView addSubview:label];
-    [label release];
-
-    [cell.contentView addSubview:cellView];
-    [cellView release];
-}
-
-- (void)customizeCellForAdd:(UITableViewCell *)cell indexPath:(NSIndexPath *)indexPath {
-    cell.backgroundView.backgroundColor = [UVStyleSheet zebraBgColor:(indexPath.row % 2 == 0)];
-
-    UIFont *font = [UIFont boldSystemFontOfSize:18];
-    NSString *text = [NSString stringWithFormat:@"%@ \"%@\"", NSLocalizedStringFromTable(@"Add", @"UserVoice", nil), _textEditor.text];
-    CGSize size = [text sizeWithFont:font forWidth:260 lineBreakMode:UILineBreakModeTailTruncation];
-    CGFloat startX = 30.0 + ((260.0 - size.width) / 2.0);
-
-    // Prefix: Add "
-    UILabel *label = (UILabel *)[cell.contentView viewWithTag:UV_SEARCH_RESULTS_TAG_CELL_ADD_PREFIX];
-    size = [label.text sizeWithFont:font forWidth:260 lineBreakMode:UILineBreakModeTailTruncation];
-    label.frame = CGRectMake(startX, 26, size.width, 20);
-
-    // Query
-    NSInteger prevEndX = label.frame.origin.x + label.frame.size.width;
-    CGFloat maxWidth = 260 - (size.width + 10);
-    label = (UILabel *)[cell.contentView viewWithTag:UV_SEARCH_RESULTS_TAG_CELL_ADD_QUERY];
-    label.text = _textEditor.text;
-    label.textColor = [UVStyleSheet linkTextColor];
-    size = [label.text sizeWithFont:font forWidth:maxWidth lineBreakMode:UILineBreakModeTailTruncation];
-    label.frame = CGRectMake(prevEndX, 26, size.width, 20);
-
-    // Suffix: "
-    prevEndX = label.frame.origin.x + label.frame.size.width;
-    label = (UILabel *)[cell.contentView viewWithTag:UV_SEARCH_RESULTS_TAG_CELL_ADD_SUFFIX];
-    label.frame = CGRectMake(prevEndX-1, 26, 10, 20);
+    cell.backgroundColor = [UIColor whiteColor];
+    cell.textLabel.text = NSLocalizedStringFromTable(@"Post an idea", @"UserVoice", nil);
+    if (IOS7) {
+        cell.textLabel.textColor = cell.textLabel.tintColor;
+    }
 }
 
 - (void)initCellForSuggestion:(UITableViewCell *)cell indexPath:(NSIndexPath *)indexPath {
-    // getting the cell size
-    //CGRect contentRect = cell.contentView.bounds;
-    CGFloat screenWidth = [UVClientConfig getScreenWidth];
-    CGRect contentRect = CGRectMake(0, 0, screenWidth, 71);
-    UVSuggestionButton *button = [[UVSuggestionButton alloc] initWithIndex:indexPath.row andFrame:contentRect];
-    //    NSLog(@"Init suggestion with index: %d", indexPath.row);
-
-    button.tag = UV_BASE_SUGGESTION_LIST_TAG_CELL_BACKGROUND;
-    [cell.contentView addSubview:button];
-    [button release];
-
+    cell.backgroundColor = [UIColor whiteColor];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    UIImageView *heart = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"uv_heart.png"]];
+    UILabel *subs = [UILabel new];
+    subs.font = [UIFont systemFontOfSize:14];
+    subs.textColor = [UIColor grayColor];
+    subs.tag = SUBSCRIBER_COUNT;
+    UILabel *title = [UILabel new];
+    title.numberOfLines = 0;
+    title.tag = TITLE;
+    title.font = [UIFont systemFontOfSize:17];
+    UILabel *status = [UILabel new];
+    status.font = [UIFont systemFontOfSize:11];
+    status.tag = STATUS;
+    UIView *statusColor = [UIView new];
+    statusColor.tag = STATUS_COLOR;
+    CALayer *layer = [CALayer layer];
+    layer.frame = CGRectMake(0, 0, 9, 9);
+    [statusColor.layer addSublayer:layer];
+    NSArray *constraints = @[
+        @"|-[title]-|",
+        @"|-[heart(==9)]-3-[subs]-10-[statusColor(==9)]-5-[status]",
+        @"V:|-12-[title]-6-[heart(==9)]",
+        @"V:[title]-6-[statusColor(==9)]",
+        @"V:[title]-4-[status]",
+        @"V:[title]-2-[subs]"
+    ];
+    [self configureView:cell.contentView
+               subviews:NSDictionaryOfVariableBindings(subs, title, heart, statusColor, status)
+            constraints:constraints
+         finalCondition:indexPath == nil
+        finalConstraint:@"V:[heart]-14-|"];
 }
 
 - (void)customizeCellForSuggestion:(UITableViewCell *)cell indexPath:(NSIndexPath *)indexPath {
-    //    NSLog(@"Customize suggestion with index: %d", indexPath.row);
+    [self customizeCellForSuggestion:[_suggestions objectAtIndex:indexPath.row] cell:cell];
+}
 
-    UVSuggestion *suggestion = [[self suggestions] objectAtIndex:(_searching ? indexPath.row-1 : indexPath.row)];
-    UVSuggestionButton *button = (UVSuggestionButton *)[cell.contentView viewWithTag:UV_BASE_SUGGESTION_LIST_TAG_CELL_BACKGROUND];
-    [button setZebraColorFromIndex:indexPath.row];
-    [button showSuggestion:suggestion withIndex:indexPath.row];
+- (void)initCellForResult:(UITableViewCell *)cell indexPath:(NSIndexPath *)indexPath {
+    [self initCellForSuggestion:cell indexPath:indexPath];
+}
+
+- (void)customizeCellForResult:(UITableViewCell *)cell indexPath:(NSIndexPath *)indexPath {
+    [self customizeCellForSuggestion:[_searchResults objectAtIndex:indexPath.row] cell:cell];
 }
 
 - (void)initCellForLoad:(UITableViewCell *)cell indexPath:(NSIndexPath *)indexPath {
-    //NSLog(@"Load more index: %d", indexPath.row);
-
-    //CGRect contentRect = cell.contentView.bounds;
-    CGFloat screenWidth = [UVClientConfig getScreenWidth];
-    CGRect contentRect = CGRectMake(0, 0, screenWidth, 71);
-    UVCellViewWithIndex *cellView = [[UVCellViewWithIndex alloc] initWithIndex:indexPath.row andFrame:contentRect];
-    [cellView setZebraColorFromIndex:indexPath.row];
-
-    // Can't use built-in textLabel, as this forces a white background
-    UILabel *textLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 26, screenWidth, 20)];
-    textLabel.text = NSLocalizedStringFromTable(@"Load more ideas...", @"UserVoice", nil);
-    textLabel.textColor = [UVStyleSheet primaryTextColor];
-    textLabel.backgroundColor = [UIColor clearColor];
-    textLabel.font = [UIFont boldSystemFontOfSize:18];
-    textLabel.textAlignment = UITextAlignmentCenter;
-    [cell addSubview:textLabel];
-    [textLabel release];
-
-    [cell.contentView addSubview:cellView];
-    [cellView release];
+    cell.backgroundView = [[UIView alloc] initWithFrame:cell.frame];
+    UILabel *label = [[UILabel alloc] initWithFrame:cell.frame];
+    label.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    label.backgroundColor = [UIColor clearColor];
+    label.font = [UIFont systemFontOfSize:16];
+    label.textAlignment = NSTextAlignmentCenter;
+    label.tag = LOADING;
+    [cell addSubview:label];
 }
 
 - (void)customizeCellForLoad:(UITableViewCell *)cell indexPath:(NSIndexPath *)indexPath {
-    cell.backgroundView.backgroundColor = [UVStyleSheet zebraBgColor:(indexPath.row % 2 == 0)];
+    UILabel *label = (UILabel *)[cell viewWithTag:LOADING];
+    label.text = _loading ? NSLocalizedStringFromTable(@"Loading...", @"UserVoice", nil) : NSLocalizedStringFromTable(@"Load more", @"UserVoice", nil);
+}
+
+- (void)customizeCellForSuggestion:(UVSuggestion *)suggestion cell:(UITableViewCell *)cell {
+    UILabel *title = (UILabel *)[cell.contentView viewWithTag:TITLE];
+    UILabel *subs = (UILabel *)[cell.contentView viewWithTag:SUBSCRIBER_COUNT];
+    UILabel *status = (UILabel *)[cell.contentView viewWithTag:STATUS];
+    UIView *statusColor = [cell.contentView viewWithTag:STATUS_COLOR];
+    title.text = suggestion.title;
+    subs.text = [NSString stringWithFormat:@"%d", (int)suggestion.subscriberCount];
+    [statusColor.layer.sublayers.lastObject setBackgroundColor:suggestion.statusColor.CGColor];
+    status.textColor = suggestion.statusColor;
+    status.text = [suggestion.status uppercaseString];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)theTableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     NSString *identifier;
-    BOOL selectable = YES;
-    UITableViewCellStyle style = UITableViewCellStyleDefault;
-
-    if (indexPath.row == 0 && _searching)
-        identifier = @"Add";
-    else if (indexPath.row < (_searching ? [self.suggestions count] + 1 : [self.suggestions count]))
-        identifier = @"Suggestion";
-    else
-        identifier = @"Load";
+    if (theTableView == _tableView) {
+        identifier = (indexPath.section == 0 && [UVSession currentSession].config.showPostIdea) ? @"Add" : (indexPath.row < _suggestions.count) ? @"Suggestion" : @"Load";
+    } else {
+        identifier = @"Result";
+    }
     return [self createCellForIdentifier:identifier
                                tableView:theTableView
                                indexPath:indexPath
-                                   style:style
-                              selectable:selectable];
+                                   style:UITableViewCellStyleDefault
+                              selectable:YES];
 }
 
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    NSInteger rows = 0;
-    NSInteger loadedCount = [self.suggestions count];
-    NSInteger suggestionsCount = [UVSession currentSession].clientConfig.forum.currentTopic.suggestionsCount;
-
-    if (_searching) {
-        NSLog(@"Adding extra row for 'add'");
-        // One cell per suggestion + one for "add"
-        rows = loadedCount + 1;
-
+- (NSInteger)tableView:(UITableView *)theTableView numberOfRowsInSection:(NSInteger)section {
+    if (section == 0 && [UVSession currentSession].config.showPostIdea && theTableView == _tableView) {
+        return 1;
+    } else if (theTableView == _tableView) {
+        int loadedCount = _suggestions.count;
+        int suggestionsCount = _forum.suggestionsCount;
+        return loadedCount + (loadedCount >= suggestionsCount || suggestionsCount < SUGGESTIONS_PAGE_SIZE ? 0 : 1);
     } else {
-        // One cell per suggestion + "Load More"
-        rows = [self.suggestions count] + (loadedCount>=suggestionsCount || suggestionsCount<SUGGESTIONS_PAGE_SIZE ? 0 : 1);
+        return _searchResults.count;
     }
-    return rows;
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 1;
+    return [UVSession currentSession].config.showPostIdea && tableView == _tableView ? 2 : 1;
 }
 
 #pragma mark ===== UITableViewDelegate Methods =====
 
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-    // Both for suggestions and Load More
-    return 71;
+- (CGFloat)tableView:(UITableView *)theTableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 0 && [UVSession currentSession].config.showPostIdea && theTableView == _tableView) {
+        return 44;
+    } else if (theTableView == _tableView && indexPath.row < _suggestions.count) {
+        return [self heightForDynamicRowWithReuseIdentifier:@"Suggestion" indexPath:indexPath];
+    } else if (theTableView != _tableView) {
+        return [self heightForDynamicRowWithReuseIdentifier:@"Result" indexPath:indexPath];
+    } else {
+        return 44;
+    }
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if ((section == 0 && [UVSession currentSession].config.showPostIdea) || tableView != _tableView) {
+        return nil;
+    } else {
+        return _forum.prompt;
+    }
+}
+
+- (void)showSuggestion:(UVSuggestion *)suggestion {
+    UVSuggestionDetailsViewController *next = [[UVSuggestionDetailsViewController alloc] initWithSuggestion:suggestion];
+    [self.navigationController pushViewController:next animated:YES];
+}
+
+- (void)composeButtonTapped {
+    UVPostIdeaViewController *next = [UVPostIdeaViewController new];
+    next.initialText = _searchController.searchBar.text;
+    [self presentModalViewController:next];
 }
 
 - (void)tableView:(UITableView *)theTableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [theTableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.row == 0 && _searching) {
-        UVNewSuggestionViewController *next = [[UVNewSuggestionViewController alloc] initWithForum:self.forum
-                                                                                             title:_textEditor.text];
-        [self.navigationController pushViewController:next animated:YES];
-        [next release];
-    } else if (indexPath.row < (_searching ? [self.suggestions count] + 1 : [self.suggestions count])) {
-        UVSuggestion *suggestion = [suggestions objectAtIndex:(_searching ? indexPath.row-1 : indexPath.row)];
-        UVSuggestionDetailsViewController *next = [[UVSuggestionDetailsViewController alloc] init];
-        next.suggestion = suggestion;
-
-        [self.navigationController pushViewController:next animated:YES];
-        [next release];
+    if (theTableView == _tableView) {
+        if (indexPath.section == 0 && [UVSession currentSession].config.showPostIdea) {
+            [self composeButtonTapped];
+        } else if (indexPath.row < _suggestions.count) {
+            [self showSuggestion:[_suggestions objectAtIndex:indexPath.row]];
+        } else {
+            [self retrieveMoreSuggestions];
+        }
     } else {
-        // This is the last row in the table, so it's the "Load more ideas" cell
-        [self retrieveMoreSuggestions];
+        [self showSuggestion:[_searchResults objectAtIndex:indexPath.row]];
     }
+    [theTableView deselectRowAtIndexPath:indexPath animated:YES];
 }
 
-- (void)pushSuggestionShowView:(NSInteger)index {
-    UVSuggestion *suggestion = [suggestions objectAtIndex:index];
-    UVSuggestionDetailsViewController *next = [[UVSuggestionDetailsViewController alloc] init];
-    next.suggestion = suggestion;
-
-    [self.navigationController pushViewController:next animated:YES];
-    [next release];
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+    return tableView == _tableView ? 30 : 0;
 }
 
-- (void)setLeftBarButtonCancel {
-    UIBarButtonItem *cancelItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
-                                                                                target:self
-                                                                                action:@selector(dismissTextEditor)];
-    [self.navigationItem setLeftBarButtonItem:cancelItem animated:NO];
-    [cancelItem release];
-}
+#pragma mark ===== UISearchBarDelegate Methods =====
 
-- (void)setLeftBarButtonClear {
-    UIBarButtonItem *clearItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-                                                                                target:self
-                                                                                action:@selector(resetList)];
-    [self.navigationItem setLeftBarButtonItem:clearItem animated:NO];
-    [clearItem release];
-}
-
-- (void)resetList {
-    _searching = NO;
-    [self showExitButton];
-    _textEditor.text = @"";
-
-    [self.suggestions removeAllObjects];
-    [self.suggestions addObjectsFromArray:[UVSession currentSession].clientConfig.forum.currentTopic.suggestions];
-    [self.tableView reloadData];
-    [self.navigationItem setLeftBarButtonItem:nil animated:NO];
-}
-
-- (void)dismissTextEditor {
-    [self.textEditor resignFirstResponder];
-    [self resetList];
-}
-
-#pragma mark ===== UVTextEditorDelegate Methods =====
-
-- (BOOL)textEditorShouldBeginEditing:(UVTextEditor *)theTextEditor {
-    tableView.allowsSelection = NO;
-    tableView.scrollEnabled = NO;
-
-    CGFloat screenWidth = [UVClientConfig getScreenWidth];
-
-    UIView *headerView = (UIView *)self.tableView.tableHeaderView;
-    NSInteger height = self.view.bounds.size.height;
-    CGRect frame = CGRectMake(0, 0, screenWidth, height);
-    UIView *textBar = [headerView viewWithTag:UV_SEARCH_TEXTBAR];
-
-    // Maximize header view to allow text editor to grow (leaving room for keyboard) 216
-    [self setLeftBarButtonCancel];
-    [self hideExitButton];
-    textBar.frame = frame;
-    textBar.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.0];
-    theTextEditor.backgroundColor = [UIColor whiteColor];
-    [UIView beginAnimations:@"growHeader" context:nil];
-
-    textBar.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.7];
-    frame = CGRectMake(0, 0, screenWidth, 40);
-    theTextEditor.frame = frame;  // (may not actually need to change this, since bg is white)
-
-    [UIView commitAnimations];
+- (BOOL)searchBarShouldBeginEditing:(UISearchBar *)searchBar {
+    [_searchController setActive:YES animated:YES];
+    [searchBar setShowsCancelButton:YES animated:YES];
     return YES;
 }
 
-- (BOOL)textEditorShouldReturn:(UVTextEditor *)theTextEditor {
-    NSLog(@"Check for: %@", self.textEditor.text);
-    [self showActivityIndicator];
-    [self.textEditor resignFirstResponder];
-    _searching = YES;
-
-    if (self.textEditor.text) {
-        [UVSuggestion searchWithForum:self.forum query:self.textEditor.text delegate:self];
-        [[UVSession currentSession] trackInteraction:@"si"];
-    }
-
-    return NO;
-}
-
-- (void)textEditorDidEndEditing:(UVTextEditor *)theTextEditor {
-    //NSLog(@"textEditorDidEndEditing");
-
-    // reset nav
-    if (_textEditor.text) {
-        //NSLog(@"setLeftBarButtonClear");
-        [self setLeftBarButtonClear];
-    }
-
-    UIView *headerView = (UIView *)self.tableView.tableHeaderView;
-    UIView *textBar = [headerView viewWithTag:UV_SEARCH_TEXTBAR];
-
-    CGFloat screenWidth = [UVClientConfig getScreenWidth];
-
-    // Minimize text editor and header
-    [UIView beginAnimations:@"shrinkHeader" context:nil];
-    textBar.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.0];
-
-    [UIView commitAnimations];
-    textBar.frame = CGRectMake(0, 0, screenWidth, 40);
-
-    tableView.allowsSelection = YES;
-    tableView.scrollEnabled = YES;
-}
-
-- (BOOL)textEditorShouldEndEditing:(UVTextEditor *)theTextEditor {
-    return YES;
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
+    [UVSuggestion searchWithForum:_forum query:searchBar.text delegate:self];
 }
 
 #pragma mark ===== Basic View Methods =====
 
-// Implement loadView to create a view hierarchy programmatically, without using a nib.
 - (void)loadView {
     [super loadView];
+    [UVBabayaga track:VIEW_FORUM id:_forum.forumId];
+    [self setupGroupedTableView];
 
-    self.navigationItem.title = self.forum.currentTopic.prompt;
+    UISearchBar *searchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 44)];
+    searchBar.placeholder = NSLocalizedStringFromTable(@"Search forum", @"UserVoice", nil);
+    searchBar.delegate = self;
 
-    CGRect frame = [self contentFrame];
-    CGFloat screenWidth = [UVClientConfig getScreenWidth];
+    _searchController = [[UISearchDisplayController alloc] initWithSearchBar:searchBar contentsController:self];
+    _searchController.delegate = self;
+    _searchController.searchResultsDataSource = self;
+    _searchController.searchResultsDelegate = self;
+    _tableView.tableHeaderView = searchBar;
 
-    UITableView *theTableView = [[UITableView alloc] initWithFrame:frame style:UITableViewStylePlain];
-    theTableView.dataSource = self;
-    theTableView.delegate = self;
-    theTableView.contentInset = UIEdgeInsetsMake(0, 0, 0, 0);
-    theTableView.sectionFooterHeight = 0.0;
-    theTableView.sectionHeaderHeight = 0.0;
-    theTableView.backgroundColor = [UVStyleSheet backgroundColor];
-
-    // Add empty footer, to suppress blank cells (with separators) after actual content
-    UIView *footer = [[[UIView alloc] initWithFrame:CGRectMake(0, 0, screenWidth, 0)] autorelease];
-    theTableView.tableFooterView = footer;
-
-    [self addShadowSeparatorToTableView:theTableView];
-
-    NSInteger headerHeight = [self supportsSearch] ? 40 : 0;
-    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, screenWidth, headerHeight)];
-    headerView.backgroundColor = [UIColor clearColor];
-
-    if ([self supportsSearch]) {
-        // Add text editor to table header
-        UIView *textBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, screenWidth, 40)];
-        textBar.backgroundColor = [UIColor clearColor];
-
-        CAGradientLayer *gradient = [CAGradientLayer layer];
-        gradient.colors = [NSArray arrayWithObjects:(id)[[UIColor colorWithRed:0.91f green:0.91f blue:0.93f alpha:1.0f] CGColor], (id)[[UIColor colorWithRed:0.77f green:0.78f blue:0.80f alpha:1.0f] CGColor], nil];
-        [textBar.layer insertSublayer:gradient atIndex:0];
-
-        textBar.tag = UV_SEARCH_TEXTBAR;
-
-        _textEditor = [[UVTextEditor alloc] initWithFrame:CGRectMake(0, 0, screenWidth, 40)];
-        _textEditor.delegate = self;
-        _textEditor.autocorrectionType = UITextAutocorrectionTypeYes;
-        _textEditor.minNumberOfLines = 1;
-        _textEditor.maxNumberOfLines = 1;
-        _textEditor.autoresizesToText = NO;
-
-        [_textEditor setReturnKeyType:UIReturnKeyGo];
-        _textEditor.enablesReturnKeyAutomatically = NO;
-        _textEditor.placeholder = [self.forum example];
-
-        [textBar addSubview:_textEditor];
-        [headerView addSubview:textBar];
-        [textBar release];
+    if (![UVSession currentSession].clientConfig.whiteLabel) {
+        _tableView.tableFooterView = self.poweredByView;
     }
-    theTableView.tableHeaderView = headerView;
-    [headerView release];
 
-    self.tableView = theTableView;
-    [theTableView release];
-    self.view = tableView;
+    if ([UVSession currentSession].config.showPostIdea) {
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCompose
+                                                                                               target:self
+                                                                                               action:@selector(composeButtonTapped)];
+        if ([self.navigationItem.rightBarButtonItem respondsToSelector:@selector(setTintColor:)])
+            self.navigationItem.rightBarButtonItem.tintColor = [UIColor colorWithRed:0.24f green:0.51f blue:0.95f alpha:1.0f];
+    }
+
+    if ([UVSession currentSession].isModal && _firstController) {
+        self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedStringFromTable(@"Close", @"UserVoice", nil)
+                                                                                 style:UIBarButtonItemStylePlain
+                                                                                target:self
+                                                                                action:@selector(dismiss)];
+    }
 }
 
-- (void)reloadTableData {
-//    NSLog(@"UVSuggestionListViewController: reloadTableData");
-    self.suggestions = [UVSession currentSession].clientConfig.forum.currentTopic.suggestions;
+- (void)showActivityIndicator {
+    _loading = YES;
+    [_tableView reloadData];
+}
 
-    [self.tableView reloadData];
+- (void)hideActivityIndicator {
+    _loading = NO;
+}
+
+- (void)initNavigationItem {
+    self.navigationItem.title = _forum.name;
+    self.exitButton = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedStringFromTable(@"Cancel", @"UserVoice", nil)
+                                                       style:UIBarButtonItemStylePlain
+                                                      target:self
+                                                      action:@selector(dismiss)];
+    if ([UVSession currentSession].isModal && _firstController) {
+        self.navigationItem.leftBarButtonItem = _exitButton;
+    }
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
 
-    if (self.forum) {
-//        NSLog(@"UVSuggestionListViewController: reloadSuggestions");
-        if ([UVSession currentSession].clientConfig.forum.currentTopic.suggestionsNeedReload) {
-            self.suggestions = nil;
-        }
-
-        if (!self.suggestions) {
-//            NSLog(@"UVSuggestionListViewController: populateSuggestions");
+    if (_forum) {
+        if (!_suggestions) {
             [self populateSuggestions];
         }
-
-        if (![UVStreamPoller instance].timerIsRunning) {
-            [[UVStreamPoller instance] startTimer];
-            [UVStreamPoller instance].lastPollTime = [NSDate date];
-        }
     }
-    [self.tableView reloadData];
-
-//    NSLog(@"Adding observer");
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(reloadTableData)
-                                                 name:@"TopicSuggestionsUpdated"
-                                               object:nil];
-}
-
-- (void)viewWillDisappear:(BOOL)animated {
-    [super viewWillDisappear:animated];
-//    NSLog(@"Removing observer");
-    [[NSNotificationCenter defaultCenter] removeObserver:self
-                                                    name:@"TopicSuggestionsUpdated"
-                                                  object:nil];
+    [_tableView reloadData];
 }
 
 - (void)dealloc {
-    self.forum = nil;
-    self.textEditor = nil;
-    self.suggestions = nil;
-    [super dealloc];
+    self.tableView.delegate = nil;
+    self.tableView.dataSource = nil;
 }
-
 
 @end

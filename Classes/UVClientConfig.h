@@ -11,33 +11,22 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import "UVBaseModel.h"
 
-@class UVForum;
 @class UVSubdomain;
 
-@interface UVClientConfig : UVBaseModel {
-    BOOL ticketsEnabled;
-    BOOL feedbackEnabled;
-    UVForum *forum;
-    UVSubdomain *subdomain;
-    NSArray *customFields;
-    NSArray *topArticles;
-    NSArray *topSuggestions;
-    NSInteger clientId;
-}
+@interface UVClientConfig : UVBaseModel
 
-@property (assign) BOOL ticketsEnabled;
-@property (assign) BOOL feedbackEnabled;
-@property (nonatomic, retain) UVForum *forum;
 @property (nonatomic, retain) UVSubdomain *subdomain;
 @property (nonatomic, retain) NSArray *customFields;
-@property (nonatomic, retain) NSArray *topArticles;
-@property (nonatomic, retain) NSArray *topSuggestions;
-@property (assign) NSInteger clientId;
+@property (nonatomic, retain) NSString *key;
+@property (nonatomic, retain) NSString *secret;
+@property (nonatomic, assign) BOOL ticketsEnabled;
+@property (nonatomic, assign) BOOL feedbackEnabled;
+@property (nonatomic, assign) BOOL whiteLabel;
+@property (nonatomic, assign) NSInteger clientId;
+@property (nonatomic, assign) NSInteger defaultForumId;
 
 + (id)getWithDelegate:(id)delegate;
 + (CGFloat)getScreenWidth;
 + (CGFloat)getScreenHeight;
-+ (UIInterfaceOrientation)getOrientation;
-+ (void)setOrientation;
 
 @end

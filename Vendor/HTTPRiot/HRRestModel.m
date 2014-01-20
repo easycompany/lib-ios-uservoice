@@ -21,7 +21,7 @@
 static NSMutableDictionary *attributes;
 + (void)initialize {    
     if(!attributes)
-        attributes = [[NSMutableDictionary alloc] init];
+        attributes = [NSMutableDictionary new];
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -51,7 +51,7 @@ static NSMutableDictionary *attributes;
 }
 
 + (void)setDelegate:(NSObject *)del {
-    [self setAttributeValue:[NSValue valueWithNonretainedObject:del] forKey:kHRClassAttributesDelegateKey];
+    [self setAttributeValue:del forKey:kHRClassAttributesDelegateKey];
 }
 
 + (NSURL *)baseURL {

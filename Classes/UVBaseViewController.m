@@ -13,111 +13,120 @@
 #import "UVSuggestion.h"
 #import "UVUser.h"
 #import "UVStyleSheet.h"
-#import "UVActivityIndicator.h"
-#import "UVNetworkUtils.h"
-#import "NSError+UVExtras.h"
-#import "UVStreamPoller.h"
 #import "UVImageCache.h"
 #import "UserVoice.h"
-#import "UVSignInViewController.h"
+#import "UVAccessToken.h"
+#import "UVSigninManager.h"
+#import "UVKeyboardUtils.h"
+#import "UVUtils.h"
 
 @implementation UVBaseViewController
 
-@synthesize activityIndicator;
-@synthesize needsReload;
-@synthesize tableView;
-@synthesize exitButton;
-
-- (void)dismissUserVoice {
-    if ([UVStreamPoller instance].timerIsRunning)
-        [[UVStreamPoller instance] stopTimer];
-    [[UVImageCache sharedInstance] flush];
-    [[UVSession currentSession] flushInteractions];
-
-    [self dismissModalViewControllerAnimated:YES];
-    if ([[UserVoice delegate] respondsToSelector:@selector(userVoiceWasDismissed)])
-        [[UserVoice delegate] userVoiceWasDismissed];
+- (id)init {
+    self = [super init];
+    if (self) {
+        _signinManager = [UVSigninManager manager];
+        _signinManager.delegate = self;
+        _templateCells = [NSMutableDictionary dictionary];
+    }
+    return self;
 }
 
-- (CGRect)contentFrameWithNavBar:(BOOL)navBarEnabled {
-    CGRect barFrame = CGRectZero;
-    if (navBarEnabled) {
-        barFrame = self.navigationController.navigationBar.frame;
+- (void)dismiss {
+    if (_firstController) {
+        [[UVImageCache sharedInstance] flush];
+        [[UVSession currentSession] clear];
     }
+    if (_firstController && [[UserVoice delegate] respondsToSelector:@selector(userVoiceRequestsDismissal)]) {
+        [[UserVoice delegate] userVoiceRequestsDismissal];
+    } else {
+        [self dismissViewControllerAnimated:YES completion:nil];
+        if (_firstController && [[UserVoice delegate] respondsToSelector:@selector(userVoiceWasDismissed)]) {
+            [[UserVoice delegate] userVoiceWasDismissed];
+        }
+    }
+}
+
+- (CGRect)contentFrame {
+    CGRect barFrame = CGRectZero;
+    barFrame = self.navigationController.navigationBar.frame;
     CGRect appFrame = [UIScreen mainScreen].applicationFrame;
-//    NSLog(@"appFrame: %@", NSStringFromCGRect(appFrame));
     CGFloat yStart = barFrame.origin.y + barFrame.size.height;
-
-
-//    NSLog(@"%@", [UVSession currentSession].clientConfig);
-
-    //return CGRectMake(0, yStart, appFrame.size.width, appFrame.size.height - barFrame.size.height);
+    
     return CGRectMake(0, yStart, appFrame.size.width, appFrame.size.height - barFrame.size.height);
 }
 
-
-- (CGRect)contentFrame {
-    return [self contentFrameWithNavBar:YES];
-}
-
-- (void)showActivityIndicatorWithText: (NSString *)text {
-    if (!self.activityIndicator) {
-        self.activityIndicator = [UVActivityIndicator activityIndicatorWithText:text];
-    }
-
-    [self.activityIndicator show];
-}
-
 - (void)showActivityIndicator {
-    if (!self.activityIndicator) {
-        self.activityIndicator = [UVActivityIndicator activityIndicator];
+    if (!_shade) {
+        _shade = [[UIView alloc] initWithFrame:self.view.bounds];
+        _shade.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+        _shade.backgroundColor = [UIColor blackColor];
+        _shade.alpha = 0.5;
+        [self.view addSubview:_shade];
     }
-
-    [self.activityIndicator show];
+    if (!_activityIndicatorView) {
+        _activityIndicatorView = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
+        _activityIndicatorView.center = CGPointMake(self.view.bounds.size.width/2, self.view.bounds.size.height/4);
+        _activityIndicatorView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin|UIViewAutoresizingFlexibleBottomMargin|UIViewAutoresizingFlexibleTopMargin;
+        [self.view addSubview:_activityIndicatorView];
+    }
+    _shade.hidden = NO;
+    _activityIndicatorView.center = CGPointMake(self.view.bounds.size.width/2, self.view.bounds.size.height/([UVKeyboardUtils visible] ? 4 : 2));
+    _activityIndicatorView.hidden = NO;
+    [_activityIndicatorView startAnimating];
 }
 
 - (void)hideActivityIndicator {
-    [self.activityIndicator hide];
+    [self enableSubmitButton];
+    [_activityIndicatorView stopAnimating];
+    _activityIndicatorView.hidden = YES;
+    _shade.hidden = YES;
 }
 
-- (void)setVoteLabelTextAndColorForVotesRemaining:(NSInteger)votesRemaining label:(UILabel *)label {
-    if ([UVSession currentSession].user) {
-        if (votesRemaining == 0) {
-            label.text = NSLocalizedStringFromTable(@"Sorry, you have no more votes remaining in this forum.", @"UserVoice", nil);
-            label.textColor = [UVStyleSheet alertTextColor];
-        } else {
-            label.text = [NSString stringWithFormat:NSLocalizedStringFromTable(@"You have %d %@ remaining in this forum", @"UserVoice", @"%d for number of votes, %@ for pluralization of 'votes'"),
-                          votesRemaining,
-                          votesRemaining == 1 ? NSLocalizedStringFromTable(@"vote", @"UserVoice", nil) : NSLocalizedStringFromTable(@"votes", @"UserVoice", nil)];
-            label.textColor = [UVStyleSheet linkTextColor];
-        }
-    } else {
-        label.font = [UIFont boldSystemFontOfSize:14];
-        label.text = NSLocalizedStringFromTable(@"You will need to sign in to vote.", @"UserVoice", nil);
-        label.textColor = [UVStyleSheet alertTextColor];
+- (void)setSubmitButtonEnabled:(BOOL)enabled {
+    if (!self.navigationItem) {
+        return;
+    }
+    
+    if (self.navigationItem.rightBarButtonItem) {
+        self.navigationItem.rightBarButtonItem.enabled = enabled;
     }
 }
 
+- (void)disableSubmitButton {
+    [self setSubmitButtonEnabled:NO];
+}
+
+- (void)enableSubmitButton {
+    [self enableSubmitButtonForce:NO];
+}
+
+- (void)enableSubmitButtonForce:(BOOL)force {
+    BOOL shouldEnableButton = [self shouldEnableSubmitButton];
+
+    if (shouldEnableButton || force) {
+        [self setSubmitButtonEnabled:YES];
+    }
+}
+
+- (BOOL)shouldEnableSubmitButton {
+    return YES;
+}
+
 - (void)alertError:(NSString *)message {
-    [[[[UIAlertView alloc] initWithTitle:NSLocalizedStringFromTable(@"Error", @"UserVoice", nil)
+    [[[UIAlertView alloc] initWithTitle:NSLocalizedStringFromTable(@"Error", @"UserVoice", nil)
                                 message:message
                                delegate:nil
                       cancelButtonTitle:NSLocalizedStringFromTable(@"OK", @"UserVoice", nil)
-                      otherButtonTitles:nil] autorelease] show];
-}
-
-- (void)alertSuccess:(NSString *)message {
-    [[[[UIAlertView alloc] initWithTitle:NSLocalizedStringFromTable(@"Success", @"UserVoice", nil)
-                                 message:message
-                                delegate:nil
-                       cancelButtonTitle:NSLocalizedStringFromTable(@"OK", @"UserVoice", nil)
-                       otherButtonTitles:nil] autorelease] show];
+                      otherButtonTitles:nil] show];
 }
 
 - (void)didReceiveError:(NSError *)error {
-    [self hideActivityIndicator];
     NSString *msg = nil;
-    if ([UVNetworkUtils hasInternetAccess] && ![error isConnectionError]) {
+    [self hideActivityIndicator];
+    if ([UVUtils isConnectionError:error]) {
+        msg = NSLocalizedStringFromTable(@"There appears to be a problem with your network connection, please check your connectivity and try again.", @"UserVoice", nil);
+    } else {
         NSDictionary *userInfo = [error userInfo];
         for (NSString *key in [userInfo allKeys]) {
             if ([key isEqualToString:@"message"] || [key isEqualToString:@"type"])
@@ -136,51 +145,106 @@
         }
         if (!msg)
             msg = NSLocalizedStringFromTable(@"Sorry, there was an error in the application.", @"UserVoice", nil);
-    } else {
-        msg = NSLocalizedStringFromTable(@"There appears to be a problem with your network connection, please check your connectivity and try again.", @"UserVoice", nil);
     }
     [self alertError:msg];
-}
-
-- (NSString *)backButtonTitle {
-    return NSLocalizedStringFromTable(@"Back", @"UserVoice", nil);
 }
 
 - (void)initNavigationItem {
     self.navigationItem.title = NSLocalizedStringFromTable(@"Feedback", @"UserVoice", nil);
 
-    UIBarButtonItem *backButton = [[UIBarButtonItem alloc]
-                                   initWithTitle:[self backButtonTitle]
-                                   style:UIBarButtonItemStylePlain
-                                   target:nil
-                                   action:nil];
-    self.navigationItem.backBarButtonItem = backButton;
-    [backButton release];
+    self.navigationItem.backBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedStringFromTable(@"Back", @"UserVoice", nil)
+                                                                             style:UIBarButtonItemStylePlain
+                                                                            target:nil
+                                                                            action:nil];
 
-    if ([UVSession currentSession].isModal) {
-        self.exitButton = [[[UIBarButtonItem alloc] initWithTitle:NSLocalizedStringFromTable(@"Close", @"UserVoice", nil)
-                                                            style:UIBarButtonItemStylePlain
-                                                           target:self
-                                                           action:@selector(dismissUserVoice)] autorelease];
-        self.navigationItem.rightBarButtonItem = exitButton;
+    _exitButton = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedStringFromTable(@"Cancel", @"UserVoice", nil)
+                                                   style:UIBarButtonItemStylePlain
+                                                  target:self
+                                                  action:@selector(dismiss)];
+    if ([UVSession currentSession].isModal && _firstController) {
+        self.navigationItem.leftBarButtonItem = _exitButton;
     }
 }
 
-- (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation
-{
-    UIInterfaceOrientation deviceOrientation = [UVClientConfig getOrientation];
-    return (interfaceOrientation == deviceOrientation);
+- (UIView *)poweredByView {
+    UIView *power = [UIView new];
+    power.frame = CGRectMake(0, 0, 0, 80);
+    UILabel *uv = [UILabel new];
+    uv.text = NSLocalizedStringFromTable(@"Powered by UserVoice", @"UserVoice", nil);
+    uv.font = [UIFont systemFontOfSize:13];
+    uv.textColor = [UIColor grayColor];
+    uv.backgroundColor = [UIColor clearColor];
+    uv.textAlignment = NSTextAlignmentCenter;
+    UILabel *version = [UILabel new];
+    version.text = [NSString stringWithFormat:@"iOS SDK v%@", [UserVoice version]];
+    version.font = [UIFont systemFontOfSize:13];
+    version.textColor = [UIColor lightGrayColor];
+    version.textAlignment = NSTextAlignmentCenter;
+    version.backgroundColor = [UIColor clearColor];
+    [self configureView:power
+               subviews:NSDictionaryOfVariableBindings(uv, version)
+            constraints:@[@"V:|-[uv]-[version]", @"|[uv]|", @"|[version]|"]];
+    return power;
+}
+
+- (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation {
+    return YES;
+}
+
+- (BOOL)needNestedModalHack {
+    return [UIDevice currentDevice].systemVersion.floatValue >= 6;
+}
+
+- (void)willAnimateRotationToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation
+                                         duration:(NSTimeInterval)duration {
+
+    // We are the top modal, make to sure that parent modals use our size
+    if (self.needNestedModalHack && self.presentedViewController == nil && self.presentingViewController) {
+        for (UIViewController* parent = self.presentingViewController;
+             parent.presentingViewController;
+             parent = parent.presentingViewController) {
+            parent.view.superview.frame = parent.presentedViewController.view.superview.frame;
+        }
+    }
+    
+    [super willAnimateRotationToInterfaceOrientation:toInterfaceOrientation duration:duration];
+}
+
+- (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation
+                                duration:(NSTimeInterval)duration {
+    // We are the top modal, make to sure that parent modals are hidden during transition
+    if (self.needNestedModalHack && self.presentedViewController == nil && self.presentingViewController) {
+        for (UIViewController* parent = self.presentingViewController;
+             parent.presentingViewController;
+             parent = parent.presentingViewController) {
+            parent.view.superview.hidden = YES;
+        }
+    }
+
+    [super willRotateToInterfaceOrientation:toInterfaceOrientation duration:duration];
+}
+
+- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation {
+    // We are the top modal, make to sure that parent modals are shown after animation
+    if (self.needNestedModalHack && self.presentedViewController == nil && self.presentingViewController) {
+        for (UIViewController* parent = self.presentingViewController;
+             parent.presentingViewController;
+             parent = parent.presentingViewController) {
+            parent.view.superview.hidden = NO;
+        }
+    }
+    
+    if (!IOS7 && _tableView) {
+        [_tableView reloadData];
+    }
+
+    [super didRotateFromInterfaceOrientation:fromInterfaceOrientation];
 }
 
 #pragma mark ===== helper methods for table views =====
 
-- (void)removeBackgroundFromCell:(UITableViewCell *)cell {
-    UIView *backView = [[[UIView alloc] initWithFrame:CGRectZero] autorelease];
-    backView.backgroundColor = [UIColor clearColor];
-    cell.backgroundView = backView;
-    cell.backgroundColor = [UIColor clearColor];
-}
-
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
 - (UITableViewCell *)createCellForIdentifier:(NSString *)identifier
                                    tableView:(UITableView *)theTableView
                                    indexPath:(NSIndexPath *)indexPath
@@ -188,7 +252,7 @@
                                   selectable:(BOOL)selectable {
     UITableViewCell *cell = [theTableView dequeueReusableCellWithIdentifier:identifier];
     if (cell == nil) {
-        cell = [[[UITableViewCell alloc] initWithStyle:style reuseIdentifier:identifier] autorelease];
+        cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:identifier];
         cell.selectionStyle = selectable ? UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone;
 
         SEL initCellSelector = NSSelectorFromString([NSString stringWithFormat:@"initCellFor%@:indexPath:", identifier]);
@@ -201,114 +265,262 @@
     if ([self respondsToSelector:customizeCellSelector]) {
         [self performSelector:customizeCellSelector withObject:cell withObject:indexPath];
     }
+    if (!IOS7) {
+        cell.contentView.frame = CGRectMake(0, 0, [self cellWidthForStyle:_tableView.style accessoryType:cell.accessoryType], 0);
+        [cell.contentView setNeedsLayout];
+        [cell.contentView layoutIfNeeded];
+        for (UIView *view in cell.contentView.subviews) {
+            if ([view isKindOfClass:[UILabel class]]) {
+                UILabel *label = (UILabel *)view;
+                if (label.numberOfLines != 1) {
+                    [label setPreferredMaxLayoutWidth:label.frame.size.width];
+                }
+                [label setBackgroundColor:[UIColor clearColor]];
+            }
+        }
+    }
     return cell;
 }
-
-// Add a highlight row at the top. You need to separately add a dark shadow via
-// the table separator.
-- (void)addHighlightToCell:(UITableViewCell *)cell {
-
-    //CGRect screenRect = [[UIScreen mainScreen] bounds];
-    CGFloat screenWidth = [UVClientConfig getScreenWidth];
-
-    UIView *highlight = [[UIView alloc] initWithFrame:CGRectMake(0, 0, screenWidth, 1)];
-    highlight.backgroundColor = [UVStyleSheet topSeparatorColor];
-    highlight.opaque = YES;
-    [cell.contentView addSubview:highlight];
-    [highlight release];
-}
-
-- (void)addShadowSeparatorToTableView:(UITableView *)theTableView {
-    theTableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
-    theTableView.separatorColor = [UVStyleSheet bottomSeparatorColor];
-}
+#pragma clang diagnostic pop
 
 #pragma mark ===== Keyboard Notifications =====
 
 - (void)registerForKeyboardNotifications {
     [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keyboardWillShow:)
+                                                 name:UIKeyboardWillShowNotification object:nil];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(keyboardDidShow:)
                                                  name:UIKeyboardDidShowNotification object:nil];
 
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keyboardWillHide:)
+                                                 name:UIKeyboardWillHideNotification object:nil];
+    
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(keyboardDidHide:)
                                                  name:UIKeyboardDidHideNotification object:nil];
 
 }
 
-- (void)keyboardDidShow:(NSNotification*)notification {
-    NSDictionary* info = [notification userInfo];
-    CGRect rect = [[info objectForKey:UIKeyboardFrameBeginUserInfoKey] CGRectValue];
-    // Convert from window space to view space to account for orientation
-    kbHeight = [self.view convertRect:rect fromView:nil].size.height;
+- (void)keyboardWillShow:(NSNotification*)notification {
+    if (IPAD) {
+        CGFloat formSheetHeight = 576;
+        if (UIInterfaceOrientationIsLandscape(self.interfaceOrientation)) {
+            _kbHeight = formSheetHeight - 352;
+        } else {
+            _kbHeight = formSheetHeight - 504;
+        }
+    } else {
+        NSDictionary* info = [notification userInfo];
+        CGRect rect = [[info objectForKey:UIKeyboardFrameBeginUserInfoKey] CGRectValue];
+        // Convert from window space to view space to account for orientation
+        _kbHeight = [self.view convertRect:rect fromView:nil].size.height;
+    }
+}
 
-    UIEdgeInsets contentInsets = UIEdgeInsetsMake(0.0, 0.0, kbHeight, 0.0);
-    tableView.contentInset = contentInsets;
-    tableView.scrollIndicatorInsets = contentInsets;
+- (UIScrollView *)scrollView {
+    return _tableView;
+}
+
+- (void)keyboardDidShow:(NSNotification*)notification {
+    UIEdgeInsets contentInsets = UIEdgeInsetsMake([self scrollView].contentInset.top, 0.0, _kbHeight, 0.0);
+    [self scrollView].contentInset = contentInsets;
+    [self scrollView].scrollIndicatorInsets = contentInsets;
+}
+
+- (void)keyboardWillHide:(NSNotification*)notification {
 }
 
 - (void)keyboardDidHide:(NSNotification*)notification {
-    UIEdgeInsets contentInsets = UIEdgeInsetsZero;
-    tableView.contentInset = contentInsets;
-    tableView.scrollIndicatorInsets = contentInsets;
+    UIEdgeInsets contentInsets = UIEdgeInsetsMake([self scrollView].contentInset.top, 0.0, 0.0, 0.0);
+    [self scrollView].contentInset = contentInsets;
+    [self scrollView].scrollIndicatorInsets = contentInsets;
 }
 
-- (void)hideExitButton {
-    self.navigationItem.rightBarButtonItem = nil;
-}
-
-- (void)showExitButton {
-    if (exitButton)
-        self.navigationItem.rightBarButtonItem = exitButton;
-}
-
-- (void)promptUserToSignIn {
-    UVSignInViewController *signInView = [[[UVSignInViewController alloc] init] autorelease];
-    [self.navigationController pushViewController:signInView animated:YES];
+- (void)presentModalViewController:(UIViewController *)viewController {
+    UINavigationController *navigationController = [UINavigationController new];
+    [UVUtils applyStylesheetToNavigationController:navigationController];
+    navigationController.viewControllers = @[viewController];
+    if (IPAD)
+        navigationController.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:navigationController animated:YES completion:nil];
 }
 
 - (void)setupGroupedTableView {
-    self.view = [[[UIView alloc] initWithFrame:[self contentFrame]] autorelease];
-    self.view.backgroundColor = [UVStyleSheet backgroundColor];
-    self.view.autoresizesSubviews = YES;
-    self.tableView = [[[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleGrouped] autorelease];
-    self.tableView.backgroundView = nil;
-    self.tableView.backgroundColor = [UIColor clearColor];
-    self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-    [self.view addSubview:self.tableView];
+    _tableView = [[UITableView alloc] initWithFrame:[self contentFrame] style:UITableViewStyleGrouped];
+    _tableView.delegate = (id<UITableViewDelegate>)self;
+    _tableView.dataSource = (id<UITableViewDataSource>)self;
+    if ([UVStyleSheet instance].tableViewBackgroundColor) {
+        if (!IOS7) {
+            UIView *bg = [UIView new];
+            bg.backgroundColor = [UVStyleSheet instance].tableViewBackgroundColor;
+            _tableView.backgroundView = bg;
+        }
+        _tableView.backgroundColor = [UVStyleSheet instance].tableViewBackgroundColor;
+    }
+    self.view = _tableView;
 }
+
+- (void)setView:(UIView *)view {
+    [super setView:view];
+    if (IOS7) {
+        view.tintColor = [UVStyleSheet instance].tintColor;
+    }
+}
+
+- (void)requireUserSignedIn:(UVCallback *)callback {
+    [_signinManager signInWithCallback:callback];
+}
+
+- (void)requireUserAuthenticated:(NSString *)email name:(NSString *)name callback:(UVCallback *)callback {
+    [_signinManager signInWithEmail:email name:name callback:callback];
+}
+
+- (void)setUserName:(NSString *)theName {
+    _userName = theName;
+
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    [prefs setObject:_userName forKey:@"uv-user-name"];
+    [prefs synchronize];
+}
+
+- (NSString *)userName {
+    if ([UVSession currentSession].user)
+        return [UVSession currentSession].user.name;
+    if (_userName)
+        return _userName;
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    _userName = [prefs stringForKey:@"uv-user-name"];
+    return _userName;
+}
+
+- (void)setUserEmail:(NSString *)theEmail {
+    _userEmail = theEmail;
+
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    [prefs setObject:_userEmail forKey:@"uv-user-email"];
+    [prefs synchronize];
+}
+
+- (NSString *)userEmail {
+    if ([UVSession currentSession].user)
+        return [UVSession currentSession].user.email;
+    if (_userEmail)
+        return _userEmail;
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    _userEmail = [prefs stringForKey:@"uv-user-email"];
+    return _userEmail;
+}
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+- (CGFloat)heightForDynamicRowWithReuseIdentifier:(NSString *)reuseIdentifier indexPath:(NSIndexPath *)indexPath {
+    NSString *cacheKey = [NSString stringWithFormat:@"%@-%d", reuseIdentifier, (int)self.view.frame.size.width];
+    UITableViewCell *cell = [_templateCells objectForKey:cacheKey];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:0 reuseIdentifier:reuseIdentifier];
+        SEL initCellSelector = NSSelectorFromString([NSString stringWithFormat:@"initCellFor%@:indexPath:", reuseIdentifier]);
+        if ([self respondsToSelector:initCellSelector]) {
+            [self performSelector:initCellSelector withObject:cell withObject:nil];
+        }
+        [_templateCells setObject:cell forKey:cacheKey];
+    }
+    SEL customizeCellSelector = NSSelectorFromString([NSString stringWithFormat:@"customizeCellFor%@:indexPath:", reuseIdentifier]);
+    if ([self respondsToSelector:customizeCellSelector]) {
+        [self performSelector:customizeCellSelector withObject:cell withObject:indexPath];
+    }
+    cell.contentView.frame = CGRectMake(0, 0, [self cellWidthForStyle:_tableView.style accessoryType:cell.accessoryType], 0);
+    [cell.contentView setNeedsLayout];
+    [cell.contentView layoutIfNeeded];
+
+    // cells are usually flat so I don't bother to iterate recursively
+    for (UIView *view in cell.contentView.subviews) {
+        if ([view isKindOfClass:[UILabel class]]) {
+            UILabel *label = (UILabel *)view;
+            if (label.numberOfLines != 1) {
+                [label setPreferredMaxLayoutWidth:label.frame.size.width];
+            }
+        }
+    }
+    [cell.contentView setNeedsLayout];
+    [cell.contentView layoutIfNeeded];
+
+    return [cell.contentView systemLayoutSizeFittingSize:UILayoutFittingCompressedSize].height + 1;
+}
+#pragma clang diagnostic pop
+
+- (CGFloat)cellWidthForStyle:(UITableViewStyle)style accessoryType:(UITableViewCellAccessoryType)accessoryType {
+    CGFloat width = self.view.frame.size.width;
+    CGFloat accessoryWidth = 0;
+    CGFloat margin = 0;
+    if (IOS7) {
+        if (accessoryType == UITableViewCellAccessoryDisclosureIndicator) {
+            accessoryWidth = 33;
+        } else if (accessoryType == UITableViewCellAccessoryCheckmark) {
+            accessoryWidth = 38.5;
+        }
+    } else {
+        if (accessoryType == UITableViewCellAccessoryDisclosureIndicator || accessoryType == UITableViewCellAccessoryCheckmark) {
+            accessoryWidth = 20;
+        }
+        if (width > 20) {
+            if (width < 400) {
+                margin = 10;
+            } else {
+                margin = MAX(31, MIN(45, width*0.06));
+            }
+        } else {
+            margin = width - 10;
+        }
+    }
+    return width - (style == UITableViewStyleGrouped ? margin * 2 : 0) - accessoryWidth;
+}
+
+- (void)configureView:(UIView *)superview subviews:(NSDictionary *)viewsDict constraints:(NSArray *)constraintStrings {
+    [self configureView:superview subviews:viewsDict constraints:constraintStrings finalCondition:NO finalConstraint:nil];
+}
+
+- (void)configureView:(UIView *)superview subviews:(NSDictionary *)viewsDict constraints:(NSArray *)constraintStrings finalCondition:(BOOL)includeFinalConstraint finalConstraint:(NSString *)finalConstraint {
+    [UVUtils configureView:superview subviews:viewsDict constraints:constraintStrings finalCondition:includeFinalConstraint finalConstraint:finalConstraint];
+}
+
+- (UITextField *)configureView:(UIView *)view label:(NSString *)labelText placeholder:(NSString *)placeholderText {
+    UITextField *field = [UITextField new];
+    field.placeholder = placeholderText;
+    [field setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    UILabel *label = [UILabel new];
+    label.text = [NSString stringWithFormat:@"%@:", labelText];
+    label.backgroundColor = [UIColor clearColor];
+    label.textColor = [UIColor grayColor];
+    [label setContentHuggingPriority:UILayoutPriorityDefaultHigh forAxis:UILayoutConstraintAxisHorizontal];
+    [self configureView:view
+               subviews:NSDictionaryOfVariableBindings(field, label)
+            constraints:@[@"|-16-[label]-[field]-|", @"V:|-12-[label]", @"V:|-12-[field]"]];
+    return field;
+}
+
+#pragma mark - UVSigninManageDelegate
+
+- (void)signinManagerDidSignIn:(UVUser *)user {
+    [self hideActivityIndicator];
+}
+
+- (void)signinManagerDidFail {
+    [self hideActivityIndicator];
+}
+
 
 #pragma mark ===== Basic View Methods =====
 
 - (void)loadView {
     [self initNavigationItem];
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
     [self registerForKeyboardNotifications];
 }
 
-- (void)viewWillAppear:(BOOL)animated {
-    // Fix background color on iPad
-    if ([self.view respondsToSelector:@selector(setBackgroundView:)])
-        [self.view performSelector:@selector(setBackgroundView:) withObject:nil];
-}
-
-- (void)viewDidDisappear:(BOOL)animated {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [super viewDidDisappear:animated];
-}
-
-- (void)viewDidUnload {
-    self.activityIndicator = nil;
-}
-
 - (void)dealloc {
-    self.activityIndicator = nil;
-    self.tableView = nil;
-    self.exitButton = nil;
-    [super dealloc];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 @end

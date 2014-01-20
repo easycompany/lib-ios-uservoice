@@ -10,13 +10,19 @@
 #import "UVBaseViewController.h"
 #import "UVSuggestion.h"
 
-@interface UVSuggestionDetailsViewController : UVBaseViewController <UIAlertViewDelegate, UITableViewDataSource, UITableViewDelegate> {
-    UVSuggestion *suggestion;
-}
+@class UVTruncatingLabel;
+
+@interface UVSuggestionDetailsViewController : UVBaseViewController <UIAlertViewDelegate, UITableViewDataSource, UITableViewDelegate, UIActionSheetDelegate>
 
 @property (nonatomic, retain) UVSuggestion *suggestion;
+@property (nonatomic, retain) NSMutableArray *comments;
+@property (nonatomic, retain) UILabel *subscriberCount;
+@property (nonatomic, assign) BOOL instantAnswers;
+@property (nonatomic, retain) NSString *helpfulPrompt;
+@property (nonatomic, retain) NSString *returnMessage;
+@property (nonatomic, retain) NSString *deflectingType;
 
 - (id)initWithSuggestion:(UVSuggestion *)theSuggestion;
-- (void)setVoteLabelTextAndColorForLabel:(UILabel *)label;
+- (void)reloadComments;
 
 @end

@@ -18,33 +18,54 @@
 
 #import "UVTicket.h"
 #import "UVCustomField.h"
-#import "UVResponseDelegate.h"
-
+#import "UVSession.h"
+#import "UVConfig.h"
+#import "UVBabayaga.h"
+#import "UVDeflection.h"
 
 @implementation UVTicket
 
-+ (void)initialize {
-    [self setDelegate:[[UVResponseDelegate alloc] initWithModelClass:[self class]]];
-    [self setBaseURL:[self siteURL]];
-}
-
 + (id)createWithMessage:(NSString *)message
   andEmailIfNotLoggedIn:(NSString *)email
+                andName:(NSString *)name
         andCustomFields:(NSDictionary *)fields
             andDelegate:(id)delegate {
     NSString *path = [self apiPath:@"/tickets.json"];
     NSMutableDictionary *params = [NSMutableDictionary dictionaryWithObjectsAndKeys:
         message == nil ? @"" : message, @"ticket[message]",
         email   == nil ? @"" : email,   @"email",
+        name    == nil ? @"" : name,    @"display_name",
+        [NSString stringWithFormat:@"%d", (int)[UVDeflection interactionIdentifier]], @"interaction_identifier",
         nil];
-    for (NSString *name in [fields keyEnumerator]) {
-        [params setObject:[fields objectForKey:name] forKey:[NSString stringWithFormat:@"ticket[custom_field_values][%@]", name]];
+    
+    for (NSString *scope in [UVSession currentSession].externalIds) {
+        NSString *identifier = [[UVSession currentSession].externalIds valueForKey:scope];
+        [params setObject:identifier forKey:[NSString stringWithFormat:@"created_by[external_ids][%@]", scope]];
+    }
+
+    NSDictionary *defaultFields = [UVSession currentSession].config.customFields;
+    for (NSString *key in [defaultFields keyEnumerator]) {
+        [params setObject:[defaultFields objectForKey:key] forKey:[NSString stringWithFormat:@"ticket[custom_field_values][%@]", key]];
+    }
+
+    for (NSString *key in [fields keyEnumerator]) {
+        [params setObject:[fields objectForKey:key] forKey:[NSString stringWithFormat:@"ticket[custom_field_values][%@]", key]];
+    }
+
+    if ([UVSession currentSession].config.extraTicketInfo != nil) {
+        NSString *messageText = [NSString stringWithFormat:@"%@\n\n%@", message, [UVSession currentSession].config.extraTicketInfo];
+        [params setObject:messageText forKey:@"ticket[message]"];
+    }
+
+    if ([UVBabayaga instance].uvts) {
+        [params setObject:[UVBabayaga instance].uvts forKey:@"uvts"];
     }
 
     return [[self class] postPath:path
                        withParams:params
                            target:delegate
-                         selector:@selector(didCreateTicket:)];
+                         selector:@selector(didCreateTicket:)
+                          rootKey:@"ticket"];
 }
 
 @end
